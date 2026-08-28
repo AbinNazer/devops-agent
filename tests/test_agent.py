@@ -184,3 +184,10 @@ def test_agent_works_without_on_tool_call_callback():
     history = [{"role": "system", "content": "sys"}]
     answer = agent.run("go", history)
     assert answer == "done"
+
+def test_agent_handles_explicit_memory_command_without_provider():
+    provider = FakeProvider([])
+    agent = Agent(provider, tool_schemas=[], execute_tool_fn=lambda n, a: {}, memory_command_handler=lambda text: "Remembered it." if text.startswith("Remember") else None)
+    history = [{"role": "system", "content": "sys"}]
+    assert agent.run("Remember that ERP depends on Redis.", history) == "Remembered it."
+    assert provider.calls == []

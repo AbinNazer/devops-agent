@@ -77,7 +77,9 @@ def test_get_cpu_usage_parses_load_average():
         result = get_cpu_usage()
     assert result["success"] is True
     assert result["load_average_1min"] == 0.5
-    assert result["approx_cpu_percent"] == 50.0
+    assert result["load_per_core_1min"] == 0.5
+    assert "cpu_percent" not in result
+    assert "not CPU utilization" in result["note"]
 
 
 def test_get_cpu_usage_handles_unparseable_output():

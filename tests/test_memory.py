@@ -56,3 +56,21 @@ def test_redact_secrets_function():
     redacted = redact_secrets(text)
     assert "[REDACTED KEY]" in redacted
     assert "base64data" not in redacted
+
+
+def test_explicit_remember_and_forget(repo):
+    from app.memory.commands import handle_memory_command
+    answer = handle_memory_command(repo, "Remember that the ERP backend depends on Redis.")
+    assert "Remembered" in answer
+    assert repo.search(query="Redis")
+    assert "Archived" in handle_memory_command(repo, "Forget Redis dependency memory.")
+    assert not repo.search(query="Redis")
+
+def test_context_prefers_bounded_relevant_active_memories(repo):
+    from app.memory.context import inject_context
+    repo.store_memory(Memory(title="ERP restart", content="Redis timeout", component="erp", environment="prod", importance=4))
+    repo.store_memory(Memory(title="Unrelated", content="printer paper", component="office", environment="prod"))
+    context = inject_context(repo, "ERP restart", environment="prod", component="erp", limit=1)
+    assert len(context["memories"]) == 1
+    assert context["memories"][0]["title"] == "ERP restart"
+    assert "precedence" in context["instruction"]

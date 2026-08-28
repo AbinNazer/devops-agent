@@ -76,7 +76,7 @@ def get_cpu_usage() -> dict:
         return {"success": False, "error": "Couldn't parse load average from uptime output."}
     
     load_1min = float(match.group(1))
-    cpu_percent = (load_1min / cores) * 100
+    load_per_core = load_1min / cores
     
     return {
         "success": True,
@@ -84,8 +84,8 @@ def get_cpu_usage() -> dict:
         "load_average_1min": load_1min,
         "load_average_5min": float(match.group(2)),
         "load_average_15min": float(match.group(3)),
-        "approx_cpu_percent": round(cpu_percent, 1),
-        "note": f"Approximated from 1-min load average ({load_1min}) divided by cores ({cores}).",
+        "load_per_core_1min": round(load_per_core, 2),
+        "note": f"Load average is not CPU utilization. 1-minute load is {load_1min} on {cores} cores ({load_per_core:.2f} runnable tasks per core).",
     }
 
 

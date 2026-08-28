@@ -35,6 +35,8 @@ from app.memory.repository import MemoryRepository
 from app.memory.models import Memory
 from app.memory.feedback import record_feedback as mem_record_feedback
 from app.memory.feedback import record_outcome as mem_record_outcome
+from app.memory.commands import handle_memory_command as _handle_memory_command
+from app.memory.relationships import get_relationships
 
 memory_repo = MemoryRepository("memory.db")
 
@@ -60,6 +62,21 @@ def store_incident_memory(args):
 def record_feedback(args):
     mem_record_feedback(memory_repo.store, args.get("memory_id"), args.get("is_positive", True))
     return {"success": True}
+
+def handle_memory_command(text):
+    return _handle_memory_command(memory_repo, text)
+
+def get_related_incidents(args):
+    records = memory_repo.search(query=args.get("query"), mtype="episodic", env=args.get("env"), comp=args.get("comp"), limit=5)
+    return {"success": True, "memories": [{"id": m.id, "title": m.title, "outcome": m.outcome, "confidence": m.confidence} for m in records]}
+
+def get_component_history(args):
+    records = memory_repo.search(comp=args.get("component"), env=args.get("env"), limit=10)
+    return {"success": True, "memories": [{"id": m.id, "title": m.title, "content": m.content} for m in records]}
+
+def get_infrastructure_relationships(args):
+    records = get_relationships(memory_repo, args.get("component"), args.get("env"))
+    return {"success": True, "relationships": [{"id": m.id, "content": m.content} for m in records]}
 
 def record_outcome(args):
     mem_record_outcome(memory_repo.store, args.get("memory_id"), args.get("outcome", ""))
@@ -398,6 +415,9 @@ _DISPATCH = {
     "store_incident_memory": store_incident_memory,
     "record_feedback": record_feedback,
     "record_outcome": record_outcome,
+    "get_related_incidents": get_related_incidents,
+    "get_component_history": get_component_history,
+    "get_infrastructure_relationships": get_infrastructure_relationships,
 }
 
 # name -> {param_name: json_schema_type} for coercion

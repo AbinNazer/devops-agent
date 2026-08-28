@@ -43,7 +43,7 @@ MAX_TOOL_ITERATIONS = 8  # safety valve against infinite tool-call loops
 
 
 class Agent:
-    def __init__(self, provider, tool_schemas: list, execute_tool_fn):
+    def __init__(self, provider, tool_schemas: list, execute_tool_fn, memory_command_handler=None):
         """
         provider: an LLMProvider instance
         tool_schemas: list of tool schemas to show the LLM
@@ -52,6 +52,7 @@ class Agent:
         self.provider = provider
         self.tool_schemas = tool_schemas
         self.execute_tool_fn = execute_tool_fn
+        self.memory_command_handler = memory_command_handler
 
     def run(self, user_input: str, history: list, on_tool_call=None) -> str:
         """
@@ -63,6 +64,12 @@ class Agent:
         before each tool executes, so a caller (like the CLI) can display
         progress without the Agent needing to know about print/rich/etc.
         """
+        if self.memory_command_handler:
+            direct_answer = self.memory_command_handler(user_input)
+            if direct_answer is not None:
+                history.append({"role": "user", "content": user_input})
+                history.append({"role": "assistant", "content": direct_answer})
+                return direct_answer
         history.append({"role": "user", "content": user_input})
         logger.info("user_request=%r", user_input)
 

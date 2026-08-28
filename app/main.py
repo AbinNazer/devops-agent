@@ -20,7 +20,7 @@ import sys
 
 from app.config import Config, validate_vps_config
 from app.llm_provider import build_provider
-from app.tool_registry import TOOL_SCHEMAS, execute_tool
+from app.tool_registry import TOOL_SCHEMAS, execute_tool, handle_memory_command
 from app.agent import Agent, SYSTEM_PROMPT
 from app.session import save_session, load_session, list_sessions
 from app.logging_config import setup_logging
@@ -101,7 +101,7 @@ def main():
         print(f"Couldn't start LLM provider: {e}")
         sys.exit(1)
 
-    agent = Agent(provider=provider, tool_schemas=TOOL_SCHEMAS, execute_tool_fn=execute_tool)
+    agent = Agent(provider=provider, tool_schemas=TOOL_SCHEMAS, execute_tool_fn=execute_tool, memory_command_handler=handle_memory_command)
     history = fresh_history()
 
     _print_system(f"DevOps Agent ready — {provider.name}. Type /help for commands, Ctrl+C to quit.\n")
