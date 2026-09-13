@@ -105,11 +105,11 @@ class GroqProvider(LLMProvider):
 class OpenAIProvider(LLMProvider):
     """OpenAI API provider."""
 
-    def __init__(self, api_key: str, model: str):
+    def __init__(self, api_key: str, model: str, base_url: str = "", label: str = "OpenAI"):
         from openai import OpenAI  # lazy import
-        self.client = OpenAI(api_key=api_key)
+        self.client = OpenAI(api_key=api_key, base_url=base_url or None)
         self.model = model
-        self.name = f"OpenAI ({model}, hosted)"
+        self.name = f"{label} ({model}, hosted)"
 
     def check_alive(self) -> None:
         self.client.models.list()

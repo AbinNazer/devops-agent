@@ -353,7 +353,24 @@ def build_router(config) -> LLMRouter:
         if name == "openai":
             if not config.OPENAI_API_KEY:
                 return None
-            return OpenAIProvider(api_key=config.OPENAI_API_KEY, model=config.OPENAI_MODEL)
+            return OpenAIProvider(
+                api_key=config.OPENAI_API_KEY, model=config.OPENAI_MODEL,
+                base_url=getattr(config, "OPENAI_BASE_URL", ""),
+            )
+        if name == "openrouter":
+            if not config.OPENROUTER_API_KEY:
+                return None
+            return OpenAIProvider(
+                api_key=config.OPENROUTER_API_KEY, model=config.OPENROUTER_MODEL,
+                base_url="https://openrouter.ai/api/v1", label="OpenRouter",
+            )
+        if name == "nvidia":
+            if not config.NVIDIA_NIM_API_KEY:
+                return None
+            return OpenAIProvider(
+                api_key=config.NVIDIA_NIM_API_KEY, model=config.NVIDIA_NIM_MODEL,
+                base_url="https://integrate.api.nvidia.com/v1", label="NVIDIA NIM",
+            )
         if name == "anthropic":
             if not config.ANTHROPIC_API_KEY:
                 return None

@@ -45,6 +45,13 @@ class Config:
     # OpenAI (hosted)
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
     OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+    OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")  # e.g. AgentRouter
+
+    OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
+    OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")
+
+    NVIDIA_NIM_API_KEY = os.environ.get("NVIDIA_NIM_API_KEY", "")
+    NVIDIA_NIM_MODEL = os.environ.get("NVIDIA_NIM_MODEL", "meta/llama-3.1-70b-instruct")
 
     # Anthropic (hosted)
     ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
