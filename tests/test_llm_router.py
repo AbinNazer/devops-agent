@@ -379,13 +379,30 @@ class TestEnvPreservation:
         from app.config import Config
         assert isinstance(Config.LLM_FALLBACK_PROVIDERS, list)
 
-    def test_ollama_model_configured(self):
-        from app.config import Config
-        assert Config.OLLAMA_MODEL == "qwen2.5:3b"
+    def test_ollama_defaults_preserved(self, monkeypatch):
+        import importlib
+        import app.config as config
 
-    def test_openai_model_configured(self):
-        from app.config import Config
-        assert Config.OPENAI_MODEL == "claude-opus-4-6"
+        monkeypatch.delenv("OLLAMA_MODEL", raising=False)
+
+        with patch("dotenv.load_dotenv", return_value=None):
+            importlib.reload(config)
+            assert config.Config.OLLAMA_HOST == "http://localhost:11434"
+            assert config.Config.OLLAMA_MODEL == "qwen2.5:7b"
+
+        importlib.reload(config)
+
+    def test_openai_defaults(self, monkeypatch):
+        import importlib
+        import app.config as config
+
+        monkeypatch.delenv("OPENAI_MODEL", raising=False)
+
+        with patch("dotenv.load_dotenv", return_value=None):
+            importlib.reload(config)
+            assert config.Config.OPENAI_MODEL == "gpt-4o"
+
+        importlib.reload(config)
 
     def test_anthropic_defaults(self):
         from app.config import Config
