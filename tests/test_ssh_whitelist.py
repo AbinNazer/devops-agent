@@ -106,13 +106,19 @@ def test_whitelist_rejects_k3s_and_process_write_or_injection_attempts(command):
     "docker run -it ubuntu",
     "docker rm backend",
     "docker stop backend",
-    "docker restart backend",
-    "systemctl restart nginx",
+    # NOTE: docker restart and systemctl restart are now PHASE 5 allowed
+    # actions — they are whitelisted for safe, approved remediation.
     "systemctl stop nginx",
     "systemctl disable nginx",
 ])
 def test_whitelist_rejects_explicitly_forbidden_commands(command):
     assert is_command_allowed(command) is False
+
+
+def test_whitelist_allows_phase5_restart_commands():
+    """Phase 5: docker restart and systemctl restart are now safe, allowed actions."""
+    assert is_command_allowed("docker restart backend") is True
+    assert is_command_allowed("systemctl restart nginx") is True
 
 
 def test_whitelist_rejects_unknown_commands_by_default():

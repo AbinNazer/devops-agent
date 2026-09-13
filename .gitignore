@@ -1,9 +1,46 @@
-memory.db 
+# Environment / secrets
 .env
+venv/
+.venv/
+
+# Python cache
 __pycache__/
 *.pyc
-venv/
-.pytest_cache/
+*.pyo
+*.pyd
 *.egg-info/
+
+# Tests
+.pytest_cache/
+.coverage
+htmlcov/
+
+# Runtime data
+memory.db
 sessions/
 logs/
+.freebuff/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.swp
+*~
+
+# Frontend build output
+desktop/dist/
+desktop/node_modules/
+
+*.tsbuildinfo
+
+# Frontend build/cache
+desktop/dist/
+desktop/node_modules/
+*.tsbuildinfo

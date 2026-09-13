@@ -31,6 +31,8 @@ from app.tools.health import check_infrastructure_health
 from app.intelligence.diagnosis import plan_diagnostics
 from app.intelligence.summaries import generate_technical_summary
 from app.intelligence.health_analyzer import evaluate_health
+from app.control.controller import ControlLoop
+from app.control.policy import get_allowed_actions
 from app.memory.repository import MemoryRepository
 from app.memory.models import Memory
 from app.memory.feedback import record_feedback as mem_record_feedback
@@ -372,6 +374,136 @@ TOOL_SCHEMAS = [
                 "required": ["memory_id", "outcome"]
             }
         }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_related_incidents",
+            "description": "Search memory for past incidents related to a component or query. Returns episodic memories with outcomes.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Search query (e.g. component name, issue description)."},
+                    "env": {"type": "string", "description": "Environment filter (e.g. 'prod')."},
+                    "comp": {"type": "string", "description": "Component filter (e.g. 'backend')."}
+                }
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_component_history",
+            "description": "Retrieve all memory entries for a specific component. Useful for understanding a component's past behavior.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "component": {"type": "string", "description": "Component name (e.g. 'nginx', 'redis')."},
+                    "env": {"type": "string", "description": "Environment filter."}
+                },
+                "required": ["component"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_infrastructure_relationships",
+            "description": "Get known relationships between infrastructure components (e.g. 'backend depends on redis').",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "component": {"type": "string", "description": "Starting component to find relationships for."},
+                    "env": {"type": "string", "description": "Environment filter."}
+                }
+            },
+        },
+    },
+    # --- Phase 5: Control Loop ---
+    {
+        "type": "function",
+        "function": {
+            "name": "run_diagnostic",
+            "description": (
+                "Run a structured diagnostic workflow through the Phase 5 control pipeline. "
+                "This is the ONLY way to perform controlled actions like restarting a container "
+                "or service. The pipeline: investigate → reason → plan → assess risk → request "
+                "user approval → execute approved action → verify outcome → rollback if needed → "
+                "record incident. Use this when the user wants to investigate AND potentially fix "
+                "an issue (e.g. 'restart the backend', 'the container is unhealthy, fix it'). "
+                "Always include a target (container/service name) if the user specified one."
+            ),
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "request": {"type": "string", "description": "The user's diagnostic request or problem description."},
+                    "environment": {"type": "string", "description": "Target environment (e.g. 'prod', 'staging')."},
+                    "target": {"type": "string", "description": "Specific target component (e.g. 'backend', 'redis')."}
+                },
+                "required": ["request"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_allowed_actions",
+            "description": "List the actions that JARVIS is currently allowed to execute on the infrastructure.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    # --- Phase 6: Monitoring ---
+    {
+        "type": "function",
+        "function": {
+            "name": "get_monitoring_status",
+            "description": "Return current monitoring engine status, cycle count, and anomaly/incident stats. Read-only.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_active_incidents",
+            "description": "Return list of active monitoring incidents with severity, component, and evidence. Read-only.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_incident_detail",
+            "description": "Return full details of a specific monitoring incident by ID, including timeline. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "incident_id": {"type": "string", "description": "The monitoring incident ID (e.g. MON-...)"}
+                },
+                "required": ["incident_id"]
+            }
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "get_monitoring_summary",
+            "description": "Return a summary of overall monitoring health: collector status, active incidents by severity, total anomalies. Read-only.",
+            "parameters": {"type": "object", "properties": {}}
+        }
+    },
+    {
+        "type": "function",
+        "function": {
+            "name": "explain_anomaly",
+            "description": "Explain what a specific anomaly type means, what the system actually checks, and what the current thresholds are. Read-only.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "anomaly_type": {"type": "string", "description": "e.g. cpu_high, container_stopped, error_spike"}
+                },
+                "required": ["anomaly_type"]
+            }
+        }
     }
 ]
 
@@ -419,6 +551,204 @@ _DISPATCH = {
     "get_component_history": get_component_history,
     "get_infrastructure_relationships": get_infrastructure_relationships,
 }
+
+# Phase 5: control loop functions (must be defined before _DISPATCH references them)
+_control_loop_instance = None
+
+
+def _get_control_loop():
+    """Lazy-initialize the control loop with the shared tool executor."""
+    global _control_loop_instance
+    if _control_loop_instance is None:
+        _control_loop_instance = ControlLoop(execute_tool_fn=execute_tool)
+    return _control_loop_instance
+
+
+def run_diagnostic(args):
+    """Run a structured diagnostic workflow through the Phase 5 control loop."""
+    controller = _get_control_loop()
+    result = controller.run(
+        request=args.get("request", ""),
+        environment=args.get("environment", ""),
+        target=args.get("target", ""),
+    )
+    return {
+        "success": result.get("success", False),
+        "incident_id": result.get("incident_id", ""),
+        "outcome": result.get("outcome", "unknown"),
+        "summary": result.get("summary", ""),
+        "hypotheses": result.get("hypotheses", []),
+        "selected_hypothesis": result.get("selected_hypothesis"),
+        "confidence": result.get("confidence", 0.0),
+        "actions_taken": result.get("actions_taken", []),
+        "verification": result.get("verification", []),
+    }
+
+
+def get_allowed_actions_info(args):
+    """Return the list of allowed and blocked actions."""
+    return {"success": True, "actions": get_allowed_actions()}
+
+
+# Dispatch entry: add Phase 5 tools
+_DISPATCH["run_diagnostic"] = run_diagnostic
+_DISPATCH["get_allowed_actions"] = get_allowed_actions_info
+
+# Phase 6 anomaly explanation (reads from actual implementation, not invented)
+_ANOMALY_EXPLANATIONS = {
+    "cpu_high": "Monitors CPU usage via system metrics. Warning at {warn}%, critical at {crit}%.",
+    "memory_high": "Monitors memory usage via system metrics. Warning at {warn}%, critical at {crit}%.",
+    "disk_high": "Monitors disk usage via system metrics. Warning at {warn}%, critical at {crit}%.",
+    "load_high": "Monitors load average per CPU core. Warning at {warn}, critical at {crit}.",
+    "container_stopped": "Detects non-running container states (exited, dead, restarting).",
+    "container_unhealthy": "Detects Docker healthcheck reporting unhealthy status.",
+    "container_restarting": "Detects containers with restart count >= warning threshold (default: {warn}).",
+    "container_restart_loop": "Detects containers with restart count >= critical threshold (default: {crit}).",
+    "container_cpu_spike": "Monitors per-container CPU usage. Warning at {warn}%.",
+    "container_memory_spike": "Monitors per-container memory usage. Warning at {warn}%.",
+    "service_failed": "Detects systemd services in failed state.",
+    "service_stopped": "Detects systemd services that are not active.",
+    "error_spike": "Detects error count spikes in logs. Warning at {warn}, critical at {crit}.",
+    "oom_detected": "Detects OOM/out-of-memory indicators in container logs.",
+    "crash_indicator": "Detects panic/fatal/segfault/killed indicators in logs.",
+}
+
+
+def explain_anomaly(args):
+    """Explain an anomaly type based on actual implementation, not invention."""
+    from app.monitoring.thresholds import ThresholdConfig
+    config = ThresholdConfig()
+    atype = args.get("anomaly_type", "")
+    template = _ANOMALY_EXPLANATIONS.get(atype)
+    if not template:
+        return {"success": False, "error": f"Unknown anomaly type: '{atype}'. Known types: {', '.join(sorted(_ANOMALY_EXPLANATIONS.keys()))}"}
+    _tmap = {
+        "cpu_high": (config.cpu_warning, config.cpu_critical, "%"),
+        "memory_high": (config.memory_warning, config.memory_critical, "%"),
+        "disk_high": (config.disk_warning, config.disk_critical, "%"),
+        "load_high": (config.load_warning_per_core, config.load_critical_per_core, " per core"),
+        "container_restarting": (config.container_restart_warning, config.container_restart_critical, " restarts"),
+        "container_restart_loop": (config.container_restart_warning, config.container_restart_critical, " restarts"),
+        "container_cpu_spike": (config.container_cpu_warning, 100.0, "%"),
+        "container_memory_spike": (config.container_memory_warning, 100.0, "%"),
+        "error_spike": (config.log_error_warning, config.log_error_critical, " errors"),
+    }
+    th = _tmap.get(atype)
+    if th:
+        w, c, u = th
+        explanation = f"{template} Defaults: warning at {w}{u}, critical at {c}{u}."
+    else:
+        explanation = template
+    return {"success": True, "anomaly_type": atype, "explanation": explanation, "note": "This is based on the actual implemented detection logic. Thresholds are configurable."}
+
+_DISPATCH["explain_anomaly"] = explain_anomaly
+
+# Phase 6: monitoring engine (lazy-initialized, shared)
+_monitoring_engine = None
+_ssh_tunnel = None  # kept alive alongside the engine
+
+
+def _get_monitoring_engine():
+    """
+    Lazy-initialize the monitoring engine.
+
+    Tries to connect to real Prometheus via SSH tunnel first.
+    Falls back to MockCollector if Prometheus is unreachable.
+    """
+    global _monitoring_engine, _ssh_tunnel
+    if _monitoring_engine is not None:
+        return _monitoring_engine
+
+    from app.monitoring.engine import MonitoringEngine
+    from app.config import Config
+
+    # Try real Prometheus via SSH tunnel
+    if Config.VPS_HOST and Config.VPS_SSH_USER:
+        try:
+            from app.monitoring.ssh_tunnel import SSHTunnelManager
+            from app.monitoring.prometheus_collector import PrometheusCollector
+
+            tunnel = SSHTunnelManager(
+                remote_port=Config.PROMETHEUS_PORT,
+                max_lifetime=600,  # 10 minutes
+            )
+            tunnel.start()
+            _ssh_tunnel = tunnel
+
+            base_url = tunnel.local_url
+            if base_url:
+                collector = PrometheusCollector(base_url=base_url)
+                if collector.is_available():
+                    _monitoring_engine = MonitoringEngine(collector=collector)
+                    import logging
+                    logging.getLogger("tool_registry").info(
+                        "prometheus_collector_active url=%s", base_url)
+                    return _monitoring_engine
+                else:
+                    # Prometheus not ready, close tunnel
+                    tunnel.close()
+                    _ssh_tunnel = None
+            else:
+                tunnel.close()
+                _ssh_tunnel = None
+        except Exception as e:
+            import logging
+            logging.getLogger("tool_registry").warning(
+                "prometheus_setup_failed error=%s — falling back to MockCollector", e)
+            if _ssh_tunnel:
+                try:
+                    _ssh_tunnel.close()
+                except Exception:
+                    pass
+                _ssh_tunnel = None
+
+    # Fall back to MockCollector
+    from app.monitoring.collector import MockCollector
+    _monitoring_engine = MonitoringEngine(collector=MockCollector())
+    return _monitoring_engine
+
+
+def get_monitoring_status(args):
+    """Return current monitoring engine status and stats."""
+    engine = _get_monitoring_engine()
+    return {"success": True, "status": engine.get_summary()}
+
+
+def get_active_incidents(args):
+    """Return list of active monitoring incidents."""
+    engine = _get_monitoring_engine()
+    return {"success": True, "incidents": engine.get_active_incidents()}
+
+
+def get_incident_detail(args):
+    """Return details of a specific incident."""
+    engine = _get_monitoring_engine()
+    incident_id = args.get("incident_id", "")
+    if not incident_id:
+        return {"success": False, "error": "incident_id is required"}
+    inc = engine.get_incident(incident_id)
+    if not inc:
+        return {"success": False, "error": f"Incident {incident_id} not found"}
+    return {"success": True, "incident": inc}
+
+
+def get_monitoring_summary(args):
+    """Return a summary of monitoring health."""
+    engine = _get_monitoring_engine()
+    summary = engine.get_summary()
+    return {"success": True, "summary": summary}
+
+
+# Phase 6 dispatch entries (must be after function definitions)
+_DISPATCH["get_monitoring_status"] = get_monitoring_status
+_DISPATCH["get_active_incidents"] = get_active_incidents
+_DISPATCH["get_incident_detail"] = get_incident_detail
+_DISPATCH["get_monitoring_summary"] = get_monitoring_summary
+
+
+# Master set of every tool name the LLM may request.
+# Derived from TOOL_SCHEMAS — single source of truth.
+TOOL_NAMES = frozenset(schema["function"]["name"] for schema in TOOL_SCHEMAS)
 
 # name -> {param_name: json_schema_type} for coercion
 _PARAM_TYPES = {

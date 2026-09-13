@@ -35,6 +35,42 @@ class Config:
     # or an instance role. This is only the region, since boto3 needs one.
     AWS_REGION = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", ""))
 
+    # Prometheus (Phase 6 — accessed via SSH tunnel to VPS localhost)
+    PROMETHEUS_PORT = int(os.environ.get("PROMETHEUS_PORT", "4001"))
+
+    # Google Gemini (hosted)
+    GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
+    GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+
+    # OpenAI (hosted)
+    OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
+    OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
+
+    # Anthropic (hosted)
+    ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
+    ANTHROPIC_MODEL = os.environ.get("ANTHROPIC_MODEL", "claude-sonnet-4-20250514")
+
+    # Multi-provider failover: comma-separated list of fallback providers.
+    # The primary provider is always LLM_PROVIDER. Fallbacks are tried in
+    # order when the primary (or a previous fallback) fails with a retryable
+    # error (rate limit, timeout, 5xx, model unavailable).
+    # Optional local voice providers. Text chat is unaffected when disabled.
+    VOICE_ENABLED = os.environ.get("VOICE_ENABLED", "false").lower() == "true"
+    STT_PROVIDER = os.environ.get("STT_PROVIDER", "whisper")
+    TTS_PROVIDER = os.environ.get("TTS_PROVIDER", "kokoro")
+    KOKORO_VOICE = os.environ.get("KOKORO_VOICE", "am_michael")
+    WHISPER_MODEL = os.environ.get("WHISPER_MODEL", "base")
+
+    # Worker/control-plane settings. The control plane currently uses these
+    # as development configuration; worker credentials are never exposed to UI.
+    WORKER_ENABLED = os.environ.get("WORKER_ENABLED", "true").lower() == "true"
+    WORKER_CONTROL_PLANE_URL = os.environ.get("WORKER_CONTROL_PLANE_URL", "http://127.0.0.1:8001")
+    WORKER_ID = os.environ.get("WORKER_ID", "")
+    WORKER_ENROLLMENT_TOKEN = os.environ.get("WORKER_ENROLLMENT_TOKEN", "")
+    LLM_FALLBACK_PROVIDERS = [
+        p.strip() for p in os.environ.get("LLM_FALLBACK_PROVIDERS", "").split(",") if p.strip()
+    ]
+
 
 def validate_vps_config() -> list:
     """

@@ -17,12 +17,60 @@ Rules:
 - Never invent infrastructure information. If you need real data, call a tool.
 - Base every conclusion on actual tool results you received this conversation.
 - Never claim you ran a tool if you didn't.
-- You cannot execute shell commands or perform destructive operations — you \
-only have the read-only tools you've been given. If asked to do something \
-destructive (delete, restart, deploy, modify), say plainly that this isn't \
-available yet.
+- You cannot execute arbitrary shell commands. You must NEVER construct or \
+execute raw shell strings. All infrastructure interaction goes through tools.
+- Some tools are read-only (get_*, docker_status, check_*, list_*, etc.).
+- For safe controlled actions (restart a container, restart a service), use \
+the `run_diagnostic` tool — it routes through a controlled pipeline with \
+risk assessment, approval, verification, and rollback. Never attempt to \
+restart anything directly. When the user asks to restart something, call \
+`run_diagnostic` with their request and let the control loop handle it.
+- If the user asks to restart something but doesn't specify a target \
+(container name or service name), ask them which container or service \
+before calling run_diagnostic — do not guess or pick one.
+- The following remain PERMANENTLY BLOCKED and must never be attempted: \
+delete, destroy, rm, docker exec, docker stop, docker rm, kubectl \
+delete/apply/exec, systemctl stop/disable, package installation, \
+firewall modification, user management, database destructive operations, \
+sudo, curl|bash, wget|bash, or any arbitrary shell command.
 - If the tools available don't give you enough information to answer \
 confidently, say so explicitly rather than guessing.
+
+Phase 5 ground truth — only describe capabilities that are actually \
+implemented. Never invent implementation details:
+- Allowed actions: ONLY restart_container (docker restart) and \
+restart_service (systemctl restart). Nothing else.
+- Rollback for restart actions: the system restarts the container/service \
+again. It does NOT stop/recreate containers, does NOT use docker run, \
+cannot restore previous Docker configuration, and has no stored snapshots \
+of container state.
+- Verification: checks container running state, docker health status \
+(via docker inspect), and recent logs for crash indicators (panic, \
+fatal, segfault, killed, oom). For services: checks systemctl status. \
+There is NO HTTP health probing, NO curl-based checks.
+- Risk assessment: computed dynamically from 7 weighted factors (severity, \
+blast radius, reversibility, production impact, destructive potential, \
+confidence, dependency impact). Do NOT state a specific numeric score \
+unless you are quoting an actual tool result.
+- There are no stored historical success rates, no management keys, and \
+no pre-captured container configurations.
+- If you are explaining what WOULD happen during a hypothetical action, \
+state only what the actual code does. If something is not implemented, \
+say so. Do not present hypothetical capabilities as existing features.
+
+Phase 6 monitoring ground truth:
+- Monitoring tools (get_monitoring_status, get_active_incidents, \
+get_incident_detail, get_monitoring_summary, explain_anomaly) are \
+READ-ONLY. They never execute mutations.
+- The monitoring engine detects anomalies using deterministic threshold \
+checks, NOT LLM reasoning. Normal monitoring cycles do NOT call the LLM.
+- When reporting monitoring data, quote actual tool results. Do NOT \
+invent incident details, timestamps, severity levels, or evidence that \
+was not returned by the tool.
+- Monitoring does NOT directly restart, stop, delete, or modify \
+anything. All controlled actions go through Phase 5.
+- If asked about monitoring capabilities, describe only what the \
+monitoring tools actually return. If something is not exposed, say so.
 - Investigate before concluding — for a vague question ("is my server ok?", \
 "why is X slow?"), gather the relevant metrics/logs before answering.
 - For broad requests ("check everything", "is anything wrong", "how's my \
@@ -43,16 +91,24 @@ MAX_TOOL_ITERATIONS = 8  # safety valve against infinite tool-call loops
 
 
 class Agent:
-    def __init__(self, provider, tool_schemas: list, execute_tool_fn, memory_command_handler=None):
+    def __init__(self, provider, tool_schemas: list, execute_tool_fn,
+                 memory_command_handler=None, allowed_tool_names=None):
         """
         provider: an LLMProvider instance
         tool_schemas: list of tool schemas to show the LLM
         execute_tool_fn: callable(name, arguments) -> dict result
+        allowed_tool_names: optional frozenset/set of tool names the LLM
+            may request.  If provided, any tool call whose name is NOT in
+            this set is rejected before execution and a clear error is
+            returned to the LLM.  This prevents hallucinated tool names
+            (e.g. "container_stats" when only "docker_stats" is registered)
+            from reaching the dispatch layer.
         """
         self.provider = provider
         self.tool_schemas = tool_schemas
         self.execute_tool_fn = execute_tool_fn
         self.memory_command_handler = memory_command_handler
+        self.allowed_tool_names = allowed_tool_names
 
     def run(self, user_input: str, history: list, on_tool_call=None) -> str:
         """
@@ -95,6 +151,22 @@ class Agent:
                     ))
                     continue
                 called_tools.add(tc_sig)
+
+                # Validate the tool name against the registered set.
+                # This catches hallucinated names (e.g. "container_stats" when
+                # only "docker_stats" is registered) before they reach dispatch.
+                if (self.allowed_tool_names is not None
+                        and tc["name"] not in self.allowed_tool_names):
+                    logger.warning("tool_not_registered=%s", tc["name"])
+                    tool_result = {
+                        "success": False,
+                        "error": (
+                            f"'{tc['name']}' is not a registered tool. "
+                            f"Available tools: {sorted(self.allowed_tool_names)}"
+                        ),
+                    }
+                    history.append(self.provider.tool_result_message(tc, tool_result))
+                    continue
 
                 if on_tool_call:
                     on_tool_call(tc["name"], tc["arguments"])

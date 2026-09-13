@@ -29,6 +29,9 @@ WHITELIST_PATTERNS = [
     "uptime",
     "nproc",
     "systemctl status {service}",
+    # Phase 5: safe, explicitly approved write actions
+    "docker restart {container}",
+    "systemctl restart {service}",
     "ps aux --sort=-%cpu",
     # K3s/Kubernetes — read-only "get"/"cluster-info" only. No delete, apply,
     # create, patch, edit, rollout, scale, or exec — those are never listed
@@ -105,3 +108,13 @@ def build_docker_inspect_command(container: str) -> str:
 def build_service_status_command(service: str) -> str:
     service = validate_service_name(service)
     return f"systemctl status {service}"
+
+
+def build_docker_restart_command(container: str) -> str:
+    container = validate_container_name(container)
+    return f"docker restart {container}"
+
+
+def build_service_restart_command(service: str) -> str:
+    service = validate_service_name(service)
+    return f"systemctl restart {service}"
