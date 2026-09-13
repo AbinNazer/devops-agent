@@ -13,13 +13,24 @@ import pytest
 from app.monitoring.ssh_tunnel import SSHTunnelManager, LOCAL_BIND_HOST
 
 
+@pytest.fixture
+def mock_vps_config():
+    with patch("app.monitoring.ssh_tunnel.Config") as mock_config:
+        mock_config.VPS_HOST = "testhost"
+        mock_config.VPS_SSH_USER = "testuser"
+        mock_config.VPS_SSH_KEY_PATH = "/tmp/test_key"
+        mock_config.VPS_SSH_PORT = 22
+        mock_config.VPS_KNOWN_HOSTS_PATH = None
+        yield mock_config
+
+
 class TestSSHTunnelManagerLifecycle:
     """Test tunnel creation, start, and close lifecycle."""
 
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._connect_ssh")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._create_local_server")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._start_forwarding")
-    def test_start_sets_started_flag(self, mock_fwd, mock_server, mock_connect):
+    def test_start_sets_started_flag(self, mock_fwd, mock_server, mock_connect, mock_vps_config):
         tunnel = SSHTunnelManager(remote_port=4001)
         tunnel.start()
         assert tunnel._started is True
@@ -29,7 +40,7 @@ class TestSSHTunnelManagerLifecycle:
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._connect_ssh")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._create_local_server")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._start_forwarding")
-    def test_close_sets_closed_flag(self, mock_fwd, mock_server, mock_connect):
+    def test_close_sets_closed_flag(self, mock_fwd, mock_server, mock_connect, mock_vps_config):
         tunnel = SSHTunnelManager(remote_port=4001)
         tunnel.start()
         tunnel.close()
@@ -38,7 +49,7 @@ class TestSSHTunnelManagerLifecycle:
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._connect_ssh")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._create_local_server")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._start_forwarding")
-    def test_double_close_is_safe(self, mock_fwd, mock_server, mock_connect):
+    def test_double_close_is_safe(self, mock_fwd, mock_server, mock_connect, mock_vps_config):
         tunnel = SSHTunnelManager(remote_port=4001)
         tunnel.start()
         tunnel.close()
@@ -48,7 +59,7 @@ class TestSSHTunnelManagerLifecycle:
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._connect_ssh")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._create_local_server")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._start_forwarding")
-    def test_context_manager(self, mock_fwd, mock_server, mock_connect):
+    def test_context_manager(self, mock_fwd, mock_server, mock_connect, mock_vps_config):
         with SSHTunnelManager(remote_port=4001) as tunnel:
             assert tunnel._started is True
         assert tunnel._closed is True
@@ -73,7 +84,7 @@ class TestSSHTunnelManagerLifecycle:
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._connect_ssh")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._create_local_server")
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._start_forwarding")
-    def test_local_url_set_after_start(self, mock_fwd, mock_server, mock_connect):
+    def test_local_url_set_after_start(self, mock_fwd, mock_server, mock_connect, mock_vps_config):
         tunnel = SSHTunnelManager(remote_port=4001)
         tunnel._local_port = 12345
         tunnel.start()
@@ -215,7 +226,7 @@ class TestSSHTunnelManagerForwarding:
         tunnel._local_server.close()
 
     @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._connect_ssh")
-    def test_start_creates_server_and_starts_forwarding(self, mock_connect):
+    def test_start_creates_server_and_starts_forwarding(self, mock_connect, mock_vps_config):
         tunnel = SSHTunnelManager(remote_port=4001)
         tunnel.start()
         assert tunnel._local_port is not None

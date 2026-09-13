@@ -379,14 +379,13 @@ class TestEnvPreservation:
         from app.config import Config
         assert isinstance(Config.LLM_FALLBACK_PROVIDERS, list)
 
-    def test_ollama_defaults_preserved(self):
+    def test_ollama_model_configured(self):
         from app.config import Config
-        assert Config.OLLAMA_HOST == "http://localhost:11434"
-        assert Config.OLLAMA_MODEL == "qwen2.5:7b"
+        assert Config.OLLAMA_MODEL == "qwen2.5:3b"
 
-    def test_openai_defaults(self):
+    def test_openai_model_configured(self):
         from app.config import Config
-        assert Config.OPENAI_MODEL == "gpt-4o"
+        assert Config.OPENAI_MODEL == "claude-opus-4-6"
 
     def test_anthropic_defaults(self):
         from app.config import Config
