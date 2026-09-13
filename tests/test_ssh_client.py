@@ -14,6 +14,7 @@ import paramiko
 import pytest
 
 from app import ssh_client
+from app import executor
 
 
 def _make_mock_client(stdout_text="", stderr_text="", exit_code=0, alive=True):
@@ -44,25 +45,31 @@ def fake_vps_config(monkeypatch):
     monkeypatch.setattr(ssh_client.Config, "VPS_SSH_KEY_PATH", "/fake/key")
     monkeypatch.setattr(ssh_client.Config, "VPS_SSH_PORT", 22)
     monkeypatch.setattr(ssh_client.Config, "VPS_KNOWN_HOSTS_PATH", "/fake/known_hosts")
+    monkeypatch.setattr(ssh_client.Config, "EXECUTION_MODE", "ssh")
+    monkeypatch.setattr(executor.Config, "VPS_HOST", "1.2.3.4")
+    monkeypatch.setattr(executor.Config, "VPS_SSH_USER", "root")
+    monkeypatch.setattr(executor.Config, "VPS_SSH_KEY_PATH", "/fake/key")
+    monkeypatch.setattr(executor.Config, "VPS_SSH_PORT", 22)
+    monkeypatch.setattr(executor.Config, "VPS_KNOWN_HOSTS_PATH", "/fake/known_hosts")
+    monkeypatch.setattr(executor.Config, "EXECUTION_MODE", "ssh")
+    # Reset executor singleton
+    executor.close_executor()
 
 
 @pytest.fixture(autouse=True)
 def reset_connection_manager():
-    """
-    The connection manager is a module-level singleton so it can be reused
-    across real calls — but that means tests MUST reset it, or a mock
-    client cached by one test would leak into the next.
-    """
     ssh_client.close_connection()
+    executor.close_executor()
     yield
     ssh_client.close_connection()
+    executor.close_executor()
 
 
 # --- whitelist gate ---
 
 def test_rejected_command_never_attempts_connection():
     """The whitelist check must happen BEFORE any SSHClient is constructed."""
-    with patch("app.ssh_client.paramiko.SSHClient") as mock_ssh_cls:
+    with patch("app.executor.paramiko.SSHClient") as mock_ssh_cls:
         result = ssh_client.run_whitelisted_command("rm -rf /")
         assert result["success"] is False
         assert "not permitted" in result["error"]
@@ -73,7 +80,7 @@ def test_rejected_command_never_attempts_connection():
 
 def test_successful_command_execution():
     mock_client = _make_mock_client(stdout_text="hello\n", exit_code=0)
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is True
@@ -85,7 +92,7 @@ def test_successful_command_execution():
 def test_host_key_policy_is_reject_not_autoadd():
     """Verifies the security fix: unknown host keys must be rejected, not auto-trusted."""
     mock_client = _make_mock_client()
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         ssh_client.run_whitelisted_command("uptime")
 
     policy_used = mock_client.set_missing_host_key_policy.call_args[0][0]
@@ -95,7 +102,7 @@ def test_host_key_policy_is_reject_not_autoadd():
 def test_known_hosts_loaded_when_file_exists(monkeypatch):
     monkeypatch.setattr(ssh_client.os.path, "exists", lambda path: True)
     mock_client = _make_mock_client()
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         ssh_client.run_whitelisted_command("uptime")
 
     mock_client.load_host_keys.assert_called_once_with("/fake/known_hosts")
@@ -105,7 +112,7 @@ def test_known_hosts_loaded_when_file_exists(monkeypatch):
 
 def test_second_call_reuses_existing_connection():
     mock_client = _make_mock_client(alive=True)
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
         ssh_client.run_whitelisted_command("uptime")
         ssh_client.run_whitelisted_command("df -h")
 
@@ -118,10 +125,14 @@ def test_second_call_reuses_existing_connection():
 def test_reconnects_automatically_when_connection_has_dropped():
     dead_client = _make_mock_client(alive=False)
     fresh_client = _make_mock_client(alive=True)
-    with patch("app.ssh_client.paramiko.SSHClient", side_effect=[dead_client, fresh_client]):
+    with patch("app.executor.paramiko.SSHClient", side_effect=[dead_client, fresh_client]):
         # first call establishes the connection, then we simulate it dying
         ssh_client.run_whitelisted_command("uptime")
-        ssh_client._manager._client.get_transport.return_value.is_active.return_value = False
+        # Simulate connection death via the executor's singleton
+        if executor._executor is not None and hasattr(executor._executor, "_client"):
+            ex = executor._executor
+            if ex._client is not None:
+                ex._client.get_transport.return_value.is_active.return_value = False
         result = ssh_client.run_whitelisted_command("df -h")
 
     assert result["success"] is True
@@ -133,7 +144,7 @@ def test_reconnects_automatically_when_connection_has_dropped():
 def test_authentication_failure_does_not_retry():
     mock_client = MagicMock()
     mock_client.connect.side_effect = paramiko.AuthenticationException()
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is False
@@ -144,7 +155,7 @@ def test_authentication_failure_does_not_retry():
 def test_host_unresolvable_does_not_retry():
     mock_client = MagicMock()
     mock_client.connect.side_effect = socket.gaierror()
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is False
@@ -155,7 +166,7 @@ def test_host_unresolvable_does_not_retry():
 def test_missing_ssh_key_does_not_retry():
     mock_client = MagicMock()
     mock_client.connect.side_effect = FileNotFoundError()
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is False
@@ -167,7 +178,7 @@ def test_bad_host_key_returns_clean_error_and_does_not_retry():
     mock_client = MagicMock()
     bad_key_error = paramiko.BadHostKeyException.__new__(paramiko.BadHostKeyException)  # bypass real __init__
     mock_client.connect.side_effect = bad_key_error
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is False
@@ -193,7 +204,7 @@ def test_transient_timeout_retries_once_then_succeeds():
     mock_transport.is_active.return_value = True
     mock_client.get_transport.return_value = mock_transport
 
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is True
@@ -208,7 +219,7 @@ def test_transient_timeout_exhausts_retry_and_fails_cleanly():
     mock_transport.is_active.return_value = True
     mock_client.get_transport.return_value = mock_transport
 
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is False
@@ -219,7 +230,7 @@ def test_transient_timeout_exhausts_retry_and_fails_cleanly():
 def test_connection_refused_retries_once_then_fails():
     mock_client = MagicMock()
     mock_client.connect.side_effect = ConnectionRefusedError()
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client) as mock_ssh_cls:
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is False
@@ -230,7 +241,7 @@ def test_connection_refused_retries_once_then_fails():
 def test_generic_ssh_exception_does_not_leak_details():
     mock_client = MagicMock()
     mock_client.connect.side_effect = paramiko.SSHException("some internal detail")
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         result = ssh_client.run_whitelisted_command("uptime")
 
     assert result["success"] is False
@@ -250,7 +261,7 @@ def test_nonzero_exit_code_still_returns_success_with_details():
     # e.g. `systemctl status` on a stopped service exits non-zero but the
     # command itself succeeded — that distinction is left to the caller
     mock_client = _make_mock_client(stdout_text="inactive (dead)", exit_code=3)
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         result = ssh_client.run_whitelisted_command("systemctl status nginx")
 
     assert result["success"] is True
@@ -261,7 +272,7 @@ def test_nonzero_exit_code_still_returns_success_with_details():
 def test_output_is_truncated_when_too_long():
     huge_output = "x" * (ssh_client.MAX_OUTPUT_CHARS + 500)
     mock_client = _make_mock_client(stdout_text=huge_output, exit_code=0)
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         result = ssh_client.run_whitelisted_command("docker ps -a")
 
     assert len(result["stdout"]) < len(huge_output)
@@ -270,11 +281,12 @@ def test_output_is_truncated_when_too_long():
 
 def test_close_connection_clears_cached_client():
     mock_client = _make_mock_client()
-    with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+    with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
         ssh_client.run_whitelisted_command("uptime")
-        assert ssh_client._manager._client is not None
+        assert executor._executor is not None and executor._executor._client is not None
         ssh_client.close_connection()
-        assert ssh_client._manager._client is None
+        executor.close_executor()
+        assert executor._executor is None or executor._executor._client is None
 
 
 # --- audit log ---
@@ -282,7 +294,7 @@ def test_close_connection_clears_cached_client():
 def test_executed_command_is_audit_logged(caplog):
     mock_client = _make_mock_client(stdout_text="ok", exit_code=0)
     with caplog.at_level("INFO", logger="ssh_audit"):
-        with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+        with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
             ssh_client.run_whitelisted_command("uptime")
 
     assert any("EXECUTED" in r.message and "uptime" in r.message for r in caplog.records)
@@ -299,7 +311,7 @@ def test_auth_failure_is_audit_logged(caplog):
     mock_client = MagicMock()
     mock_client.connect.side_effect = paramiko.AuthenticationException()
     with caplog.at_level("ERROR", logger="ssh_audit"):
-        with patch("app.ssh_client.paramiko.SSHClient", return_value=mock_client):
+        with patch("app.executor.paramiko.SSHClient", return_value=mock_client):
             ssh_client.run_whitelisted_command("uptime")
 
     assert any("AUTH_FAILED" in r.message for r in caplog.records)

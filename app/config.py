@@ -27,6 +27,9 @@ class Config:
     VPS_SSH_PORT = int(os.environ.get("VPS_SSH_PORT", "22"))
     VPS_KNOWN_HOSTS_PATH = os.path.expanduser(os.environ.get("VPS_KNOWN_HOSTS_PATH", "~/.ssh/known_hosts"))
 
+    # Execution mode: "ssh" (laptop -> VPS) or "local" (on VPS directly)
+    EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "ssh")
+
     # Jenkins (runs as a Docker container on the VPS)
     JENKINS_CONTAINER_NAME = os.environ.get("JENKINS_CONTAINER_NAME", "jenkins")
 
@@ -87,6 +90,8 @@ def validate_vps_config() -> list:
     what check_network_connectivity does); just catches config mistakes.
     """
     problems = []
+    if Config.EXECUTION_MODE.lower() == "local":
+        return []
     if not Config.VPS_HOST:
         problems.append("VPS_HOST is not set in .env")
     if not Config.VPS_SSH_USER:

@@ -1,0 +1,75 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+  <title>JARVIS Terminal</title>
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <style>
+    * { margin:0; padding:0; box-sizing:border-box; }
+    body { background:#0a0e17; color:#c8d6e5; font-family:monospace; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
+    .hdr { display:flex; align-items:center; justify-content:space-between; padding:8px 16px; background:#0d1220; border-bottom:1px solid #1a2332; min-height:44px; }
+    .hdr-l { display:flex; align-items:center; gap:10px; }
+    .hdr-l .bk { color:#00d4ff; font-size:20px; cursor:pointer; text-decoration:none; padding:4px 8px; }
+    .hdr-l .tl { color:#00d4ff; font-size:14px; font-weight:600; letter-spacing:1px; }
+    .sd { width:8px; height:8px; border-radius:50%; display:inline-block; }
+    .sd.on { background:#00e676; box-shadow:0 0 6px #00e676; }
+    .sd.off { background:#ff5252; box-shadow:0 0 6px #ff5252; }
+    .sd.wait { background:#ffc107; box-shadow:0 0 6px #ffc107; animation:pls 1s infinite; }
+    @keyframes pls { 0%,100%{opacity:1} 50%{opacity:0.4} }
+    .hdr-r { display:flex; align-items:center; gap:8px; }
+    .hdr-r button { background:#1a2332; color:#8899aa; border:1px solid #2a3a4a; padding:4px 10px; border-radius:4px; font-size:12px; cursor:pointer; font-family:monospace; }
+    .hdr-r button:hover { background:#2a3a4a; color:#c8d6e5; }
+    #tc { flex:1; overflow:hidden; padding:2px; }
+    .tb { display:flex; gap:4px; padding:6px 8px; background:#0d1220; border-top:1px solid #1a2332; overflow-x:auto; flex-wrap:nowrap; min-height:42px; align-items:center; }
+    .tb button { background:#1a2332; color:#8899aa; border:1px solid #2a3a4a; padding:6px 10px; border-radius:4px; font-size:11px; cursor:pointer; white-space:nowrap; font-family:monospace; min-width:36px; text-align:center; }
+    .tb button:hover, .tb button:active { background:#00d4ff22; color:#00d4ff; border-color:#00d4ff44; }
+    .tb button.act { background:#00d4ff33; color:#00d4ff; border-color:#00d4ff; }
+    .tb .sp { width:1px; height:24px; background:#2a3a4a; flex-shrink:0; }
+    .ov { position:fixed; inset:0; background:#0a0e17ee; display:flex; flex-direction:column; align-items:center; justify-content:center; z-index:100; }
+    .spi { width:40px; height:40px; border:3px solid #1a2332; border-top-color:#00d4ff; border-radius:50%; animation:spn 0.8s linear infinite; }
+    @keyframes spn { to{transform:rotate(360deg)} }
+    .ov p { color:#8899aa; margin-top:16px; font-size:14px; }
+    .ov button { background:#00d4ff22; color:#00d4ff; border:1px solid #00d4ff44; padding:8px 20px; border-radius:4px; cursor:pointer; font-family:monospace; margin-top:12px; }
+    .et { color:#ff5252 !important; }
+  </style>
+</head>
+<body>
+  <div class="hdr">
+    <div class="hdr-l">
+      <a class="bk" href="/">&#8592;</a>
+      <span class="tl">VPS TERMINAL</span>
+      <span class="sd wait" id="dot"></span>
+    </div>
+    <div class="hdr-r">
+      <button onclick="doClear()">Clear</button>
+      <button onclick="doReconnect()">Reconnect</button>
+    </div>
+  </div>
+  <div id="tc"></div>
+  <div class="tb" id="tb">
+    <button onclick="doKey('\x1b')">ESC</button>
+    <button onclick="doKey('\t')">TAB</button>
+    <button onclick="doKey('\x7f')">DEL</button>
+    <div class="sp"></div>
+    <button id="cB" onclick="tC()">CTRL</button>
+    <button id="aB" onclick="tA()">ALT</button>
+    <div class="sp"></div>
+    <button onclick="doArr('A')">&#8593;</button>
+    <button onclick="doArr('B')">&#8595;</button>
+    <button onclick="doArr('C')">&#8594;</button>
+    <button onclick="doArr('D')">&#8592;</button>
+    <div class="sp"></div>
+    <button onclick="doKey('\x1b[H')">HOME</button>
+    <button onclick="doKey('\x1b[F')">END</button>
+    <button onclick="doKey('\x1b[5~')">PGUP</button>
+    <button onclick="doKey('\x1b[6~')">PGDN</button>
+  </div>
+  <div class="ov" id="cOv"><div class="spi"></div><p>Connecting to VPS...</p></div>
+  <div class="ov" id="eOv" style="display:none"><p class="et" id="eMsg">Connection failed</p><button onclick="doReconnect()">Retry</button></div>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
+  <script src="/static/terminal.js"></script>
+</body>
+</html>

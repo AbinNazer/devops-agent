@@ -17,14 +17,16 @@ import json
 import logging
 import uuid
 import time
+import os
 from datetime import datetime
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse
 from pydantic import BaseModel
 
+from fastapi.staticfiles import StaticFiles
 from app.config import Config
 from app.agent import Agent, SYSTEM_PROMPT
 from app.llm_router import build_router, LLMRouter, ProviderState
@@ -41,10 +43,12 @@ from app.api.conversation_store import get_store
 from app.api.task_manager import get_task_manager
 from app.api.voice import get_stt, get_tts
 from app.control_plane import get_control_plane
+from app.terminal import router as terminal_router
 
 logger = logging.getLogger("api")
 
 app = FastAPI(title="JARVIS API", version="phase7")
+app.include_router(terminal_router)
 
 
 @app.on_event("startup")
@@ -63,6 +67,8 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+# Serve static files (terminal.js)
+app.mount("/static", StaticFiles(directory="/home/abin/ai/devops-agent/app/static"), name="static")
 
 # ── State ──────────────────────────────────────────────────────
 
@@ -552,3 +558,11 @@ def worker_heartbeat(worker_id: str, body: dict, request: Request):
         return {"worker": get_control_plane().public(worker)}
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
+
+# Terminal
+
+@app.get("/terminal", response_class=HTMLResponse)
+def terminal_page():
+    html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'terminal.html')
+    with open(html_path) as f:
+        return HTMLResponse(content=f.read())

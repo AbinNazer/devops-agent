@@ -107,9 +107,10 @@ class SSHConnectionManager:
 _manager = SSHConnectionManager()
 
 
-def close_connection() -> None:
-    """Explicitly close the reused SSH connection (e.g. on CLI exit)."""
-    _manager.close()
+def close_connection():
+    """Close the executor (backward-compatible entry point)."""
+    from app.executor import close_executor
+    close_executor()
 
 
 def _execute_once(command: str) -> dict:
@@ -129,79 +130,10 @@ def _execute_once(command: str) -> dict:
 
 def run_whitelisted_command(command: str) -> dict:
     """
-    Execute a single command on the VPS over SSH — ONLY if it matches an
-    entry in the whitelist. Returns a structured dict; never raises.
-
-    Success:  {"success": True, "command": ..., "stdout": ..., "stderr": ..., "exit_code": ...}
-    Failure:  {"success": False, "error": "<safe, user-facing message>"}
+    Execute a whitelisted command — delegates to the unified executor.
+    In SSH mode: runs on the remote VPS via SSH.
+    In local mode: runs directly on this machine.
+    Preserved for backward compatibility with all existing tool imports.
     """
-    if not is_command_allowed(command):
-        logger.warning("ssh_command_rejected command=%r", command)
-        audit_logger.warning("REJECTED command=%r", command)
-        return {"success": False, "error": f"Command not permitted: '{command}'"}
-
-    if not Config.VPS_HOST or not Config.VPS_SSH_USER:
-        return {"success": False, "error": "VPS is not configured. Set VPS_HOST and VPS_SSH_USER in .env."}
-
-    start = time.time()
-
-    for attempt in (1, 2):
-        try:
-            result = _execute_once(command)
-            duration = round(time.time() - start, 2)
-            logger.info("ssh_command_executed command=%r exit_code=%s duration=%ss attempt=%d",
-                        command, result["exit_code"], duration, attempt)
-            audit_logger.info("EXECUTED command=%r exit_code=%s duration=%ss attempt=%d",
-                               command, result["exit_code"], duration, attempt)
-            return result
-
-        except paramiko.AuthenticationException:
-            logger.error("ssh_auth_failed host=%s user=%s", Config.VPS_HOST, Config.VPS_SSH_USER)
-            audit_logger.error("AUTH_FAILED command=%r", command)
-            return {"success": False, "error": "SSH authentication failed — check your SSH key and username."}
-
-        except socket.gaierror:
-            logger.error("ssh_host_unresolvable host=%s", Config.VPS_HOST)
-            audit_logger.error("HOST_UNRESOLVABLE command=%r", command)
-            return {"success": False, "error": f"Couldn't resolve host '{Config.VPS_HOST}'."}
-
-        except FileNotFoundError:
-            logger.error("ssh_key_not_found")
-            audit_logger.error("KEY_NOT_FOUND command=%r", command)
-            return {"success": False, "error": "SSH key file not found. Check VPS_SSH_KEY_PATH in your .env."}
-
-        except paramiko.BadHostKeyException:
-            logger.error("ssh_host_key_mismatch host=%s", Config.VPS_HOST)
-            audit_logger.error("HOST_KEY_MISMATCH command=%r", command)
-            _manager.close()
-            return {
-                "success": False,
-                "error": (
-                    "Host key verification failed — the VPS's key doesn't match "
-                    "what's saved in known_hosts. This could mean the server was "
-                    "rebuilt, or something is intercepting the connection. "
-                    "Verify manually before proceeding."
-                ),
-            }
-
-        except _TRANSIENT_EXCEPTIONS as e:
-            _manager.close()
-            if attempt == 1:
-                logger.warning("ssh_transient_error error_type=%s attempt=%d — retrying", type(e).__name__, attempt)
-                time.sleep(RETRY_DELAY_SECONDS)
-                continue
-            logger.error("ssh_transient_error_exhausted error_type=%s", type(e).__name__)
-            audit_logger.error("FAILED command=%r error_type=%s (after retry)", command, type(e).__name__)
-            if isinstance(e, socket.timeout):
-                return {"success": False, "error": "Connection to the VPS timed out (after retry)."}
-            if isinstance(e, ConnectionRefusedError):
-                return {"success": False, "error": "Connection refused (after retry) — SSH may not be running on that host/port."}
-            return {"success": False, "error": "Couldn't reach the VPS over SSH (after retry). The server may be offline or SSH may be unavailable."}
-
-        except Exception as e:
-            logger.error("ssh_unexpected_error error_type=%s", type(e).__name__)
-            audit_logger.error("UNEXPECTED_ERROR command=%r error_type=%s", command, type(e).__name__)
-            _manager.close()
-            return {"success": False, "error": "Unexpected error while connecting to the VPS."}
-
-    return {"success": False, "error": "Unexpected error: exhausted retries without a result."}
+    from app.executor import run_command
+    return run_command(command)

@@ -1,8 +1,0 @@
-import { useState } from "react";
-
-export function SettingsModal({ onClose }: { onClose: () => void }) {
-  const [rate, setRate] = useState(() => localStorage.getItem("jarvisSpeechRate") || "1");
-  const [autoSpeak, setAutoSpeak] = useState(() => localStorage.getItem("jarvisAutoSpeak") !== "false");
-  const save = () => { localStorage.setItem("jarvisSpeechRate", rate); localStorage.setItem("jarvisAutoSpeak", String(autoSpeak)); onClose(); };
-  return <div className="fixed inset-0 z-50 bg-black/60 flex items-center justify-center p-4"><div className="panel w-full max-w-md p-5 space-y-5"><div className="flex justify-between"><h2 className="font-semibold text-jarvis-cyan">Settings</h2><button onClick={onClose} aria-label="Close settings">×</button></div><label className="flex items-center justify-between gap-4 text-sm"><span>Speak voice-chat replies automatically</span><input type="checkbox" checked={autoSpeak} onChange={(event) => setAutoSpeak(event.target.checked)} /></label><label className="block text-sm space-y-2"><span>Speech speed: {rate}×</span><input className="w-full" type="range" min="0.7" max="1.4" step="0.1" value={rate} onChange={(event) => setRate(event.target.value)} /></label><p className="text-xs text-jarvis-muted">Voice input uses local Whisper. The first startup can take time while the model loads; later turns are faster.</p><button onClick={save} className="btn-primary w-full">Save settings</button></div></div>;
-}
