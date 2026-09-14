@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.svg">
-  <link rel="stylesheet" href="/static/app.css?v=6">
+  <link rel="stylesheet" href="/static/app.css?v=8">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
@@ -36,7 +36,7 @@
     </header>
     <section class="workspace">
       <section class="chat-panel" aria-label="Chat">
-        <div id="messages" class="messages"><div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>Awaiting your command…</h1></div></div>
+        <div id="messages" class="messages"><div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>What are we investigating?</h1><div class="quick-actions"><button type="button" data-prompt="Check infrastructure health">Check infrastructure</button><button type="button" data-prompt="Show running containers">Show containers</button><button type="button" data-prompt="Check CPU and memory usage">Check CPU / memory</button><button type="button" data-prompt="Show recent errors">Recent errors</button></div></div></div>
         <form id="chat-form" class="composer">
           <button type="button" class="plus-button" id="new-chat" aria-label="Start a new chat">＋</button>
           <textarea id="message" rows="1" placeholder="Message JARVIS..." autocomplete="off"></textarea>
@@ -50,6 +50,6 @@
       </section>
     </section>
   </main>
-  <script src="/static/app.js?v=6"></script>
+  <script src="/static/app.js?v=8"></script>
 </body>
 </html>

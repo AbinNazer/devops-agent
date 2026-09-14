@@ -11,6 +11,7 @@
     const el = document.createElement('article'); el.className = `message ${role}`;
     el.innerHTML = `<div class="message-label">${role === 'user' ? 'You' : 'JARVIS'}</div>`;
     const body = document.createElement('div'); body.textContent = content; el.append(body);
+    if (role === 'assistant') { const actions = document.createElement('div'); actions.className = 'message-actions'; actions.innerHTML = '<button type="button" data-copy>Copy</button>'; el.append(actions); }
     messages.append(el); messages.scrollTop = messages.scrollHeight; return body;
   }
   async function init() {
@@ -48,13 +49,13 @@
     await fetch(`/api/conversations/${conversationId}`, {method:'DELETE'});
     conversationId = (await (await fetch('/api/conversations', {method:'POST'})).json()).id;
     localStorage.setItem('jarvis.conversationId', conversationId);
-    messages.innerHTML = '<div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>Awaiting your command…</h1></div>';
+    messages.innerHTML = '<div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>What are we investigating?</h1><div class="quick-actions"><button type="button" data-prompt="Check infrastructure health">Check infrastructure</button><button type="button" data-prompt="Show running containers">Show containers</button><button type="button" data-prompt="Check CPU and memory usage">Check CPU / memory</button><button type="button" data-prompt="Show recent errors">Recent errors</button></div></div>';
     $('menu').hidden = true;
   }
   provider.onchange = () => fetch('/api/providers/switch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider:provider.value})});
   async function sendMessage(text) {
     addMessage('user', text); if (/^\s*(give me|open) terminal\s*$/i.test(text)) openTerminal();
-    const target = addMessage('assistant', ''); target.textContent = 'Thinking…';
+    const target = addMessage('assistant', ''); target.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
     const response = await fetch(`/api/conversations/${conversationId}/chat/stream`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text, provider:provider.value})});
     if (!response.ok) { target.textContent = `Request failed (${response.status})`; return; }
     target.textContent = ''; const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
@@ -78,6 +79,12 @@
   }
   $('message').addEventListener('focus', e => keepInputVisible(e.target));
   $('message').addEventListener('input', () => { messages.scrollTop = messages.scrollHeight; });
+  messages.addEventListener('click', e => {
+    const prompt = e.target.closest('[data-prompt]');
+    if (prompt) { $('message').value = prompt.dataset.prompt; $('message').focus(); keepChatAtBottom(); return; }
+    const copy = e.target.closest('[data-copy]');
+    if (copy) { const body = copy.closest('.message').querySelector(':scope > div:nth-child(2)'); navigator.clipboard?.writeText(body.textContent); copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy', 1200); }
+  });
   function syncViewportHeight() { const height = window.visualViewport ? window.visualViewport.height : window.innerHeight; document.documentElement.style.setProperty('--viewport-height', `${height}px`); }
   syncViewportHeight(); window.addEventListener('resize', syncViewportHeight); if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { syncViewportHeight(); if (document.activeElement === $('message')) keepChatAtBottom(); });
   fetch('/api/auth/me').then(r => r.json()).then(data => { if (data.authenticated) { showApp(); return init(); } $('login-screen').hidden = false; appShell.hidden = true; }).catch(() => { $('login-screen').hidden = false; appShell.hidden = true; });
