@@ -37,7 +37,6 @@
       const [health, infra] = await Promise.all([fetch('/api/health'), fetch('/api/infra/status')]);
       const h = await health.json(); const i = await infra.json();
       $('stat-agent').textContent = h.status === 'ok' ? 'Online' : 'Degraded';
-      $('stat-provider').textContent = h.provider || '—';
       $('stat-infra').textContent = i.status === 'ok' ? 'Healthy' : 'Needs attention';
       $('stat-time').textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
       $('status-detail').textContent = i.cached ? 'Using the backend health-check cache.' : 'Fresh health check completed.';
@@ -49,7 +48,7 @@
     await fetch(`/api/conversations/${conversationId}`, {method:'DELETE'});
     conversationId = (await (await fetch('/api/conversations', {method:'POST'})).json()).id;
     localStorage.setItem('jarvis.conversationId', conversationId);
-    messages.innerHTML = '<div class="welcome"><h1>How can I help?</h1></div>';
+    messages.innerHTML = '<div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>Awaiting your command…</h1></div>';
     $('menu').hidden = true;
   }
   provider.onchange = () => fetch('/api/providers/switch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider:provider.value})});
@@ -68,12 +67,7 @@
   $('clear-chat').onclick = () => clearChat().catch(err => addMessage('assistant', `Unable to clear chat: ${err.message}`));
   $('menu-terminal').onclick = () => { $('menu').hidden = true; openTerminal(); };
   $('logout').onclick = async () => { await fetch('/api/auth/logout', {method:'POST'}); location.reload(); };
-  document.querySelectorAll('.mobile-nav button').forEach(button => button.onclick = () => {
-    const view = button.dataset.view;
-    document.querySelectorAll('.mobile-nav button').forEach(x => x.classList.toggle('nav-active', x === button));
-    $('status-panel').hidden = view !== 'status'; document.querySelector('.chat-panel').hidden = view === 'status';
-    if (view === 'terminal') openTerminal(); else if (view === 'status') loadStatus();
-  });
+  $('menu-status').onclick = () => { $('menu').hidden = true; document.querySelector('.chat-panel').hidden = true; $('status-panel').hidden = false; loadStatus(); };
   $('status-refresh').onclick = loadStatus;
   document.addEventListener('click', e => { if (!e.target.closest('.menu-wrap')) $('menu').hidden = true; });
   function keepInputVisible(input) { setTimeout(() => input.scrollIntoView({block:'nearest', inline:'nearest'}), 250); }

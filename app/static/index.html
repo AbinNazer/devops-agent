@@ -28,6 +28,7 @@
       <div class="menu-wrap"><button class="icon-button" id="menu-button" aria-label="Open menu" aria-expanded="false">☰</button>
         <div id="menu" class="menu" hidden>
           <button id="clear-chat" type="button">Clear chat</button>
+          <button id="menu-status" type="button">Infrastructure status</button>
           <button id="menu-terminal" type="button">Open terminal</button>
           <button id="logout" type="button">Log out</button>
         </div>
@@ -35,7 +36,7 @@
     </header>
     <section class="workspace">
       <section class="chat-panel" aria-label="Chat">
-        <div id="messages" class="messages"><div class="welcome"><h1>How can I help?</h1></div></div>
+        <div id="messages" class="messages"><div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>Awaiting your command…</h1></div></div>
         <form id="chat-form" class="composer">
           <button type="button" class="plus-button" id="new-chat" aria-label="Start a new chat">＋</button>
           <textarea id="message" rows="1" placeholder="Message JARVIS..." autocomplete="off"></textarea>
@@ -44,11 +45,10 @@
       </section>
       <section id="status-panel" class="status-panel" hidden aria-label="Infrastructure status">
         <div class="status-heading"><div><span class="eyebrow">LIVE OVERVIEW</span><h2>Infrastructure</h2></div><button id="status-refresh" class="small-button" type="button">Refresh</button></div>
-        <div class="status-grid"><article class="status-card"><span>Agent</span><strong id="stat-agent">Checking…</strong></article><article class="status-card"><span>Provider</span><strong id="stat-provider">—</strong></article><article class="status-card"><span>Infrastructure</span><strong id="stat-infra">Not checked</strong></article><article class="status-card"><span>Last check</span><strong id="stat-time">—</strong></article></div>
+        <div class="status-grid"><article class="status-card"><span>Agent</span><strong id="stat-agent">Checking…</strong></article><article class="status-card"><span>Infrastructure</span><strong id="stat-infra">Not checked</strong></article><article class="status-card"><span>Last check</span><strong id="stat-time">—</strong></article></div>
         <p id="status-detail" class="status-detail">Open this view to run one lightweight health check.</p>
       </section>
     </section>
-    <nav class="mobile-nav" aria-label="Main navigation"><button class="nav-active" data-view="chat">⌁<span>Chat</span></button><button data-view="status">◈<span>Status</span></button><button data-view="terminal">▣<span>Terminal</span></button></nav>
   </main>
   <script src="/static/app.js?v=4"></script>
 </body>
