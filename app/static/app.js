@@ -4,14 +4,24 @@
   const messages = $('messages');
   const provider = $('provider');
   const appShell = document.querySelector('.app-shell');
+  const escapeHtml = value => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+  function renderMarkdown(value) {
+    let html = escapeHtml(value || '');
+    html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
+    html = html.replace(/^### (.*)$/gm, '<h4>$1</h4>').replace(/^## (.*)$/gm, '<h3>$1</h3>').replace(/^# (.*)$/gm, '<h2>$1</h2>');
+    html = html.replace(/^\|(.+)\|\n\|[-: |]+\|\n((?:\|.*\|\n?)+)/gm, (_, head, rows) => `<table><thead><tr>${head.split('|').filter(Boolean).map(x => `<th>${x.trim()}</th>`).join('')}</tr></thead><tbody>${rows.trim().split('\n').map(row => `<tr>${row.split('|').filter(Boolean).map(x => `<td>${x.trim()}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+    html = html.replace(/^[-*] (.*)$/gm, '<li>$1</li>').replace(/(?:<li>.*<\/li>\n?)+/g, x => `<ul>${x}</ul>`);
+    html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
+    return html.replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>');
+  }
 
   function addMessage(role, content) {
     const welcome = messages.querySelector('.welcome');
     if (welcome && role === 'user') welcome.remove();
     const el = document.createElement('article'); el.className = `message ${role}`;
     el.innerHTML = `<div class="message-label">${role === 'user' ? 'You' : 'JARVIS'}</div>`;
-    const body = document.createElement('div'); body.textContent = content; el.append(body);
-    if (role === 'assistant') { const actions = document.createElement('div'); actions.className = 'message-actions'; actions.innerHTML = '<button type="button" data-copy>Copy</button>'; el.append(actions); }
+    const body = document.createElement('div'); body.className = 'message-body'; body.innerHTML = role === 'assistant' ? renderMarkdown(content) : escapeHtml(content); el.append(body);
+    if (role === 'assistant') { const actions = document.createElement('div'); actions.className = 'message-actions'; actions.innerHTML = '<button type="button" data-copy aria-label="Copy response" title="Copy response">⧉</button>'; el.append(actions); }
     messages.append(el); messages.scrollTop = messages.scrollHeight; return body;
   }
   async function init() {
@@ -59,7 +69,7 @@
     const response = await fetch(`/api/conversations/${conversationId}/chat/stream`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text, provider:provider.value})});
     if (!response.ok) { target.textContent = `Request failed (${response.status})`; return; }
     target.textContent = ''; const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
-    while (true) { const {value, done} = await reader.read(); if (done) break; buffer += decoder.decode(value, {stream:true}); const chunks = buffer.split('\n\n'); buffer = chunks.pop(); chunks.forEach(chunk => { const line = chunk.split('\n').find(x => x.startsWith('data: ')); if (!line) return; const event = JSON.parse(line.slice(6)); if (event.type === 'text') target.textContent = event.content; if (event.type === 'error') target.textContent = event.content; messages.scrollTop = messages.scrollHeight; }); }
+    while (true) { const {value, done} = await reader.read(); if (done) break; buffer += decoder.decode(value, {stream:true}); const chunks = buffer.split('\n\n'); buffer = chunks.pop(); chunks.forEach(chunk => { const line = chunk.split('\n').find(x => x.startsWith('data: ')); if (!line) return; const event = JSON.parse(line.slice(6)); if (event.type === 'text') target.innerHTML = renderMarkdown(event.content); if (event.type === 'error') target.textContent = event.content; messages.scrollTop = messages.scrollHeight; }); }
   }
   function openTerminal() { window.location.assign('/terminal'); }
   $('chat-form').onsubmit = e => { e.preventDefault(); const input = $('message'); const text = input.value.trim(); if (!text) return; input.value = ''; sendMessage(text).catch(err => addMessage('assistant', `Error: ${err.message}`)); };
@@ -83,8 +93,9 @@
     const prompt = e.target.closest('[data-prompt]');
     if (prompt) { $('message').value = prompt.dataset.prompt; $('message').focus(); keepChatAtBottom(); return; }
     const copy = e.target.closest('[data-copy]');
-    if (copy) { const body = copy.closest('.message').querySelector(':scope > div:nth-child(2)'); navigator.clipboard?.writeText(body.textContent); copy.textContent = 'Copied'; setTimeout(() => copy.textContent = 'Copy', 1200); }
+    if (copy) { const body = copy.closest('.message').querySelector('.message-body'); const text = body.innerText; const done = () => { copy.textContent = '✓'; setTimeout(() => copy.textContent = '⧉', 1200); }; if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done)); else fallbackCopy(text, done); }
   });
+  function fallbackCopy(text, done) { const area = document.createElement('textarea'); area.value = text; document.body.append(area); area.select(); try { document.execCommand('copy'); done(); } finally { area.remove(); } }
   function syncViewportHeight() { const height = window.visualViewport ? window.visualViewport.height : window.innerHeight; document.documentElement.style.setProperty('--viewport-height', `${height}px`); }
   syncViewportHeight(); window.addEventListener('resize', syncViewportHeight); if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { syncViewportHeight(); if (document.activeElement === $('message')) keepChatAtBottom(); });
   fetch('/api/auth/me').then(r => r.json()).then(data => { if (data.authenticated) { showApp(); return init(); } $('login-screen').hidden = false; appShell.hidden = true; }).catch(() => { $('login-screen').hidden = false; appShell.hidden = true; });
