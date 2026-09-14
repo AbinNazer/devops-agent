@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.svg">
-  <link rel="stylesheet" href="/static/app.css?v=4">
+  <link rel="stylesheet" href="/static/app.css?v=5">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
@@ -23,11 +23,11 @@
   </section>
   <main class="app-shell">
     <header class="topbar">
-      <div class="brand"><span class="brand-mark">✦</span><span>JARVIS</span></div>
-      <label class="model-picker"><span class="sr-only">Model</span><select id="provider"></select></label>
+      <div class="brand"><span class="brand-mark">⌁</span><span>JARVIS // OPS</span></div>
       <div class="menu-wrap"><button class="icon-button" id="menu-button" aria-label="Open menu" aria-expanded="false">☰</button>
         <div id="menu" class="menu" hidden>
           <button id="clear-chat" type="button">Clear chat</button>
+          <label class="menu-provider">Provider<select id="provider"></select></label>
           <button id="menu-status" type="button">Infrastructure status</button>
           <button id="menu-terminal" type="button">Open terminal</button>
           <button id="logout" type="button">Log out</button>
@@ -44,12 +44,12 @@
         </form>
       </section>
       <section id="status-panel" class="status-panel" hidden aria-label="Infrastructure status">
-        <div class="status-heading"><div><span class="eyebrow">LIVE OVERVIEW</span><h2>Infrastructure</h2></div><button id="status-refresh" class="small-button" type="button">Refresh</button></div>
+        <div class="status-heading"><div><button id="back-chat" class="back-button" type="button">← Chat</button><span class="eyebrow">LIVE OVERVIEW</span><h2>Infrastructure</h2></div><button id="status-refresh" class="small-button" type="button">Refresh</button></div>
         <div class="status-grid"><article class="status-card"><span>Agent</span><strong id="stat-agent">Checking…</strong></article><article class="status-card"><span>Infrastructure</span><strong id="stat-infra">Not checked</strong></article><article class="status-card"><span>Last check</span><strong id="stat-time">—</strong></article></div>
         <p id="status-detail" class="status-detail">Open this view to run one lightweight health check.</p>
       </section>
     </section>
   </main>
-  <script src="/static/app.js?v=4"></script>
+  <script src="/static/app.js?v=5"></script>
 </body>
 </html>

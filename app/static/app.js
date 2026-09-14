@@ -58,7 +58,7 @@
     const response = await fetch(`/api/conversations/${conversationId}/chat/stream`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text, provider:provider.value})});
     if (!response.ok) { target.textContent = `Request failed (${response.status})`; return; }
     target.textContent = ''; const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
-    while (true) { const {value, done} = await reader.read(); if (done) break; buffer += decoder.decode(value, {stream:true}); const chunks = buffer.split('\n\n'); buffer = chunks.pop(); chunks.forEach(chunk => { const line = chunk.split('\n').find(x => x.startsWith('data: ')); if (!line) return; const event = JSON.parse(line.slice(6)); if (event.type === 'text') target.textContent = event.content; if (event.type === 'error') target.textContent = event.content; }); }
+    while (true) { const {value, done} = await reader.read(); if (done) break; buffer += decoder.decode(value, {stream:true}); const chunks = buffer.split('\n\n'); buffer = chunks.pop(); chunks.forEach(chunk => { const line = chunk.split('\n').find(x => x.startsWith('data: ')); if (!line) return; const event = JSON.parse(line.slice(6)); if (event.type === 'text') target.textContent = event.content; if (event.type === 'error') target.textContent = event.content; messages.scrollTop = messages.scrollHeight; }); }
   }
   function openTerminal() { window.location.assign('/terminal'); }
   $('chat-form').onsubmit = e => { e.preventDefault(); const input = $('message'); const text = input.value.trim(); if (!text) return; input.value = ''; sendMessage(text).catch(err => addMessage('assistant', `Error: ${err.message}`)); };
@@ -69,9 +69,11 @@
   $('logout').onclick = async () => { await fetch('/api/auth/logout', {method:'POST'}); location.reload(); };
   $('menu-status').onclick = () => { $('menu').hidden = true; document.querySelector('.chat-panel').hidden = true; $('status-panel').hidden = false; loadStatus(); };
   $('status-refresh').onclick = loadStatus;
+  $('back-chat').onclick = () => { $('status-panel').hidden = true; document.querySelector('.chat-panel').hidden = false; };
   document.addEventListener('click', e => { if (!e.target.closest('.menu-wrap')) $('menu').hidden = true; });
   function keepInputVisible(input) { setTimeout(() => input.scrollIntoView({block:'nearest', inline:'nearest'}), 250); }
   $('message').addEventListener('focus', e => keepInputVisible(e.target));
+  $('message').addEventListener('input', () => { messages.scrollTop = messages.scrollHeight; });
   function syncViewportHeight() { const height = window.visualViewport ? window.visualViewport.height : window.innerHeight; document.documentElement.style.setProperty('--viewport-height', `${height}px`); }
   syncViewportHeight(); window.addEventListener('resize', syncViewportHeight); if (window.visualViewport) window.visualViewport.addEventListener('resize', syncViewportHeight);
   fetch('/api/auth/me').then(r => r.json()).then(data => { if (data.authenticated) { showApp(); return init(); } $('login-screen').hidden = false; appShell.hidden = true; }).catch(() => { $('login-screen').hidden = false; appShell.hidden = true; });
