@@ -9,8 +9,13 @@ load_dotenv()  # loads .env if present; harmless if it isn't
 
 
 class Config:
-    WEB_USERNAME = os.environ.get("JARVIS_WEB_USERNAME", "agent")
-    WEB_PASSWORD = os.environ.get("JARVIS_WEB_PASSWORD", "admin123")
+    WEB_USERNAME = os.environ.get("JARVIS_WEB_USERNAME", "")
+    WEB_PASSWORD = os.environ.get("JARVIS_WEB_PASSWORD", "")
+    if not WEB_USERNAME or not WEB_PASSWORD:
+        raise RuntimeError(
+            "JARVIS_WEB_USERNAME and JARVIS_WEB_PASSWORD must both be set in .env — "
+            "no insecure default is provided. Set real values before starting the app."
+        )
     # Which LLM backend to use: "ollama" or "groq"
     LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
 
