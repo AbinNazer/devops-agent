@@ -1,11 +1,11 @@
 """Control-plane coordination with scoped, single-use worker enrollment."""
 from __future__ import annotations
 from dataclasses import dataclass, asdict, field
-from datetime import UTC, datetime, timedelta
+from datetime import datetime, timedelta, timezone
 import hashlib, hmac, os, secrets, threading, uuid
 
 
-def _now(): return datetime.now(UTC).replace(tzinfo=None)
+def _now(): return datetime.now(timezone.utc).replace(tzinfo=None)
 def _id(kind): return f"{kind}_{uuid.uuid4().hex}"
 def _hash(token): return hashlib.sha256(f"{os.getenv('WORKER_TOKEN_HASH_SECRET', 'local-development-only')}:{token}".encode()).hexdigest()
 

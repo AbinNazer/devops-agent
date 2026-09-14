@@ -21,9 +21,9 @@ import os
 from datetime import datetime
 from typing import Optional
 
-from fastapi import FastAPI, HTTPException, Request
+from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
 from pydantic import BaseModel
 
 from fastapi.staticfiles import StaticFiles
@@ -44,6 +44,7 @@ from app.api.task_manager import get_task_manager
 from app.api.voice import get_stt, get_tts
 from app.control_plane import get_control_plane
 from app.terminal import router as terminal_router
+from app.auth import authenticate, create_session, delete_session, valid_session
 
 logger = logging.getLogger("api")
 
@@ -68,7 +69,41 @@ app.add_middleware(
 )
 
 # Serve static files (terminal.js)
-app.mount("/static", StaticFiles(directory="/home/abin/ai/devops-agent/app/static"), name="static")
+STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
+app.mount("/static", StaticFiles(directory=STATIC_DIR), name="static")
+
+
+@app.get("/", response_class=HTMLResponse)
+def web_app():
+    """Serve the lightweight browser UI without changing agent behavior."""
+    html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'index.html')
+    with open(html_path, encoding="utf-8") as f:
+        return HTMLResponse(content=f.read())
+
+
+class LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+@app.post("/api/auth/login")
+def login(body: LoginRequest, response: Response):
+    if not authenticate(body.username, body.password):
+        raise HTTPException(status_code=401, detail="Invalid username or password")
+    response.set_cookie("jarvis_session", create_session(), httponly=True, samesite="lax", secure=False, max_age=86400)
+    return {"authenticated": True}
+
+
+@app.get("/api/auth/me")
+def auth_me(request: Request):
+    return {"authenticated": valid_session(request.cookies.get("jarvis_session"))}
+
+
+@app.post("/api/auth/logout")
+def logout(request: Request, response: Response):
+    delete_session(request.cookies.get("jarvis_session"))
+    response.delete_cookie("jarvis_session")
+    return {"authenticated": False}
 
 # ── State ──────────────────────────────────────────────────────
 
@@ -562,7 +597,9 @@ def worker_heartbeat(worker_id: str, body: dict, request: Request):
 # Terminal
 
 @app.get("/terminal", response_class=HTMLResponse)
-def terminal_page():
+def terminal_page(request: Request):
+    if not valid_session(request.cookies.get("jarvis_session")):
+        return RedirectResponse(url="/", status_code=303)
     html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'terminal.html')
     with open(html_path) as f:
         return HTMLResponse(content=f.read())

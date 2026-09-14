@@ -17,7 +17,8 @@ function initTerm() {
       yellow: "#ffc107", blue: "#448aff", magenta: "#e040fb",
       cyan: "#00d4ff", white: "#c8d6e5"
     },
-    scrollback: 10000
+    scrollback: 50000,
+    scrollSensitivity: 3
   });
   fa = new FitAddon.FitAddon();
   term.loadAddon(fa);

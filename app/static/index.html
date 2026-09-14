@@ -1,0 +1,49 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+  <title>JARVIS</title>
+  <link rel="stylesheet" href="/static/app.css?v=3">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+</head>
+<body>
+  <section id="login-screen" class="login-screen">
+    <form id="login-form" class="login-card">
+      <h1>✦ JARVIS</h1><label>Username<input id="login-username" autocomplete="username" required></label>
+      <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
+      <button type="submit">LOGIN</button><p id="login-error" role="alert"></p>
+    </form>
+  </section>
+  <main class="app-shell">
+    <header class="topbar">
+      <div class="brand"><span class="brand-mark">✦</span><span>JARVIS</span></div>
+      <label class="model-picker"><span class="sr-only">Model</span><select id="provider"></select></label>
+      <div class="menu-wrap"><button class="icon-button" id="menu-button" aria-label="Open menu" aria-expanded="false">☰</button>
+        <div id="menu" class="menu" hidden>
+          <button id="clear-chat" type="button">Clear chat</button>
+          <button id="menu-terminal" type="button">Open terminal</button>
+          <button id="logout" type="button">Log out</button>
+        </div>
+      </div>
+    </header>
+    <section class="workspace">
+      <section class="chat-panel" aria-label="Chat">
+        <div id="messages" class="messages"><div class="welcome"><h1>How can I help?</h1><p>Ask JARVIS about your infrastructure, or type <button id="welcome-terminal">give me terminal</button>.</p></div></div>
+        <form id="chat-form" class="composer">
+          <button type="button" class="plus-button" id="terminal-button" aria-label="Open terminal">＋</button>
+          <textarea id="message" rows="1" placeholder="Message JARVIS..." autocomplete="off"></textarea>
+          <button class="send-button" aria-label="Send message">➤</button>
+        </form>
+      </section>
+      <aside id="terminal-panel" class="terminal-panel" aria-label="Terminal" hidden>
+        <div class="terminal-header"><span>LOCAL TERMINAL</span><button id="close-terminal" aria-label="Close terminal">×</button></div>
+        <div id="terminal-output" class="terminal-output" tabindex="0"></div>
+      </aside>
+    </section>
+  </main>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
+  <script src="/static/app.js?v=3"></script>
+</body>
+</html>

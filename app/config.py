@@ -9,6 +9,8 @@ load_dotenv()  # loads .env if present; harmless if it isn't
 
 
 class Config:
+    WEB_USERNAME = os.environ.get("JARVIS_WEB_USERNAME", "agent")
+    WEB_PASSWORD = os.environ.get("JARVIS_WEB_PASSWORD", "admin123")
     # Which LLM backend to use: "ollama" or "groq"
     LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
 
@@ -39,7 +41,11 @@ class Config:
     AWS_REGION = os.environ.get("AWS_DEFAULT_REGION", os.environ.get("AWS_REGION", ""))
 
     # Prometheus (Phase 6 — accessed via SSH tunnel to VPS localhost)
-    PROMETHEUS_PORT = int(os.environ.get("PROMETHEUS_PORT", "4001"))
+    PROMETHEUS_PORT = (
+        int(os.environ["PROMETHEUS_PORT"])
+        if os.environ.get("PROMETHEUS_PORT")
+        else None
+    )
 
     # Google Gemini (hosted)
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")

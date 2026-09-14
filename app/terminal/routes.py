@@ -2,10 +2,11 @@ import json
 import logging
 import asyncio
 
-from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException
 from starlette.websockets import WebSocketState
 
 from .manager import get_terminal_manager
+from app.auth import valid_session
 
 logger = logging.getLogger("terminal")
 
@@ -13,7 +14,9 @@ router = APIRouter()
 
 
 @router.post("/api/terminal/session")
-async def create_terminal(rows: int = 24, cols: int = 80):
+async def create_authenticated_terminal(request: Request, rows: int = 24, cols: int = 80):
+    if not valid_session(request.cookies.get("jarvis_session")):
+        raise HTTPException(status_code=401, detail="Authentication required")
     mgr = get_terminal_manager()
     try:
         session = await mgr.create_session(rows=rows, cols=cols)
@@ -39,6 +42,9 @@ async def close_terminal(session_id: str):
 
 @router.websocket("/ws/terminal/{session_id}")
 async def terminal_ws(websocket: WebSocket, session_id: str):
+    if not valid_session(websocket.cookies.get("jarvis_session")):
+        await websocket.close(code=4401, reason="Authentication required")
+        return
     mgr = get_terminal_manager()
     session = mgr.get_session(session_id)
 
