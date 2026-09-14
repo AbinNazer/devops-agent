@@ -38,8 +38,11 @@ class TestConfigChanges:
     def test_config_has_prometheus_port(self):
         from app.config import Config
         assert hasattr(Config, "PROMETHEUS_PORT")
-        assert isinstance(Config.PROMETHEUS_PORT, int)
-        assert Config.PROMETHEUS_PORT > 0
+        # PROMETHEUS_PORT is None when unset (e.g. in CI with no .env),
+        # or a positive int when explicitly configured.
+        assert Config.PROMETHEUS_PORT is None or isinstance(Config.PROMETHEUS_PORT, int)
+        if Config.PROMETHEUS_PORT is not None:
+            assert Config.PROMETHEUS_PORT > 0
 
     def test_config_vps_settings_preserved(self):
         from app.config import Config
