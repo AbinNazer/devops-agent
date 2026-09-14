@@ -4,8 +4,13 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>JARVIS</title>
+  <meta name="theme-color" content="#08111f">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="JARVIS">
+  <link rel="manifest" href="/static/manifest.webmanifest">
+  <link rel="apple-touch-icon" href="/static/icon-192.svg">
   <link rel="stylesheet" href="/static/app.css?v=3">
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
@@ -36,14 +41,8 @@
           <button class="send-button" aria-label="Send message">➤</button>
         </form>
       </section>
-      <aside id="terminal-panel" class="terminal-panel" aria-label="Terminal" hidden>
-        <div class="terminal-header"><span>LOCAL TERMINAL</span><button id="close-terminal" aria-label="Close terminal">×</button></div>
-        <div id="terminal-output" class="terminal-output" tabindex="0"></div>
-      </aside>
     </section>
   </main>
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
   <script src="/static/app.js?v=3"></script>
 </body>
 </html>
