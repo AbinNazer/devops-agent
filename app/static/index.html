@@ -4,13 +4,14 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
   <title>JARVIS</title>
+  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
   <meta name="theme-color" content="#08111f">
   <meta name="apple-mobile-web-app-capable" content="yes">
   <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.svg">
-  <link rel="stylesheet" href="/static/app.css?v=3">
+  <link rel="stylesheet" href="/static/app.css?v=4">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
@@ -34,15 +35,21 @@
     </header>
     <section class="workspace">
       <section class="chat-panel" aria-label="Chat">
-        <div id="messages" class="messages"><div class="welcome"><h1>How can I help?</h1><p>Ask JARVIS about your infrastructure, or type <button id="welcome-terminal">give me terminal</button>.</p></div></div>
+        <div id="messages" class="messages"><div class="welcome"><h1>How can I help?</h1></div></div>
         <form id="chat-form" class="composer">
-          <button type="button" class="plus-button" id="terminal-button" aria-label="Open terminal">＋</button>
+          <button type="button" class="plus-button" id="new-chat" aria-label="Start a new chat">＋</button>
           <textarea id="message" rows="1" placeholder="Message JARVIS..." autocomplete="off"></textarea>
           <button class="send-button" aria-label="Send message">➤</button>
         </form>
       </section>
+      <section id="status-panel" class="status-panel" hidden aria-label="Infrastructure status">
+        <div class="status-heading"><div><span class="eyebrow">LIVE OVERVIEW</span><h2>Infrastructure</h2></div><button id="status-refresh" class="small-button" type="button">Refresh</button></div>
+        <div class="status-grid"><article class="status-card"><span>Agent</span><strong id="stat-agent">Checking…</strong></article><article class="status-card"><span>Provider</span><strong id="stat-provider">—</strong></article><article class="status-card"><span>Infrastructure</span><strong id="stat-infra">Not checked</strong></article><article class="status-card"><span>Last check</span><strong id="stat-time">—</strong></article></div>
+        <p id="status-detail" class="status-detail">Open this view to run one lightweight health check.</p>
+      </section>
     </section>
+    <nav class="mobile-nav" aria-label="Main navigation"><button class="nav-active" data-view="chat">⌁<span>Chat</span></button><button data-view="status">◈<span>Status</span></button><button data-view="terminal">▣<span>Terminal</span></button></nav>
   </main>
-  <script src="/static/app.js?v=3"></script>
+  <script src="/static/app.js?v=4"></script>
 </body>
 </html>

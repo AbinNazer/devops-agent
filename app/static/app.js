@@ -31,14 +31,25 @@
     if (data.active_provider) provider.value = data.active_provider.split('(')[0].trim().toLowerCase();
   }
   function showApp() { $('login-screen').hidden = true; appShell.hidden = false; }
+  async function loadStatus() {
+    $('stat-agent').textContent = 'Checking…';
+    try {
+      const [health, infra] = await Promise.all([fetch('/api/health'), fetch('/api/infra/status')]);
+      const h = await health.json(); const i = await infra.json();
+      $('stat-agent').textContent = h.status === 'ok' ? 'Online' : 'Degraded';
+      $('stat-provider').textContent = h.provider || '—';
+      $('stat-infra').textContent = i.status === 'ok' ? 'Healthy' : 'Needs attention';
+      $('stat-time').textContent = new Date().toLocaleTimeString([], {hour:'2-digit', minute:'2-digit'});
+      $('status-detail').textContent = i.cached ? 'Using the backend health-check cache.' : 'Fresh health check completed.';
+    } catch (err) { $('stat-agent').textContent = 'Offline'; $('stat-infra').textContent = 'Unavailable'; $('status-detail').textContent = 'Could not reach the backend.'; }
+  }
   $('login-form').onsubmit = async e => { e.preventDefault(); const error = $('login-error'); error.textContent = ''; const response = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('login-username').value, password:$('login-password').value})}); if (!response.ok) { error.textContent = 'Invalid username or password'; return; } showApp(); init().catch(err => addMessage('assistant', `Unable to connect: ${err.message}`)); };
   async function clearChat() {
     if (!conversationId || !confirm('Clear this chat?')) return;
     await fetch(`/api/conversations/${conversationId}`, {method:'DELETE'});
     conversationId = (await (await fetch('/api/conversations', {method:'POST'})).json()).id;
     localStorage.setItem('jarvis.conversationId', conversationId);
-    messages.innerHTML = '<div class="welcome"><h1>How can I help?</h1><p>Ask JARVIS about your infrastructure, or type <button id="welcome-terminal">give me terminal</button>.</p></div>';
-    $('welcome-terminal').onclick = openTerminal;
+    messages.innerHTML = '<div class="welcome"><h1>How can I help?</h1></div>';
     $('menu').hidden = true;
   }
   provider.onchange = () => fetch('/api/providers/switch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider:provider.value})});
@@ -52,11 +63,18 @@
   }
   function openTerminal() { window.location.assign('/terminal'); }
   $('chat-form').onsubmit = e => { e.preventDefault(); const input = $('message'); const text = input.value.trim(); if (!text) return; input.value = ''; sendMessage(text).catch(err => addMessage('assistant', `Error: ${err.message}`)); };
-  $('terminal-button').onclick = openTerminal; $('welcome-terminal').onclick = openTerminal;
+  $('new-chat').onclick = () => clearChat().catch(err => addMessage('assistant', `Unable to start a new chat: ${err.message}`));
   $('menu-button').onclick = () => { const menu = $('menu'); menu.hidden = !menu.hidden; $('menu-button').setAttribute('aria-expanded', String(!menu.hidden)); };
   $('clear-chat').onclick = () => clearChat().catch(err => addMessage('assistant', `Unable to clear chat: ${err.message}`));
   $('menu-terminal').onclick = () => { $('menu').hidden = true; openTerminal(); };
   $('logout').onclick = async () => { await fetch('/api/auth/logout', {method:'POST'}); location.reload(); };
+  document.querySelectorAll('.mobile-nav button').forEach(button => button.onclick = () => {
+    const view = button.dataset.view;
+    document.querySelectorAll('.mobile-nav button').forEach(x => x.classList.toggle('nav-active', x === button));
+    $('status-panel').hidden = view !== 'status'; document.querySelector('.chat-panel').hidden = view === 'status';
+    if (view === 'terminal') openTerminal(); else if (view === 'status') loadStatus();
+  });
+  $('status-refresh').onclick = loadStatus;
   document.addEventListener('click', e => { if (!e.target.closest('.menu-wrap')) $('menu').hidden = true; });
   function keepInputVisible(input) { setTimeout(() => input.scrollIntoView({block:'nearest', inline:'nearest'}), 250); }
   $('message').addEventListener('focus', e => keepInputVisible(e.target));
