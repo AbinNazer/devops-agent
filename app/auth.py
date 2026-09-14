@@ -9,6 +9,10 @@ _sessions: set[str] = set()
 
 
 def authenticate(username: str, password: str) -> bool:
+    # Fail closed: if the server has no real credentials configured, NOTHING
+    # authenticates — including an attacker submitting empty strings to match.
+    if not Config.WEB_USERNAME or not Config.WEB_PASSWORD:
+        return False
     return hmac.compare_digest(username, Config.WEB_USERNAME) and hmac.compare_digest(password, Config.WEB_PASSWORD)
 
 

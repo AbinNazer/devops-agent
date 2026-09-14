@@ -9,13 +9,11 @@ load_dotenv()  # loads .env if present; harmless if it isn't
 
 
 class Config:
+    # Empty by default — deliberately NOT crashing at import time (this class
+    # is imported by every module and CI, which never has these set). Instead,
+    # app/auth.py.authenticate() refuses ALL logins when either is empty.
     WEB_USERNAME = os.environ.get("JARVIS_WEB_USERNAME", "")
     WEB_PASSWORD = os.environ.get("JARVIS_WEB_PASSWORD", "")
-    if not WEB_USERNAME or not WEB_PASSWORD:
-        raise RuntimeError(
-            "JARVIS_WEB_USERNAME and JARVIS_WEB_PASSWORD must both be set in .env — "
-            "no insecure default is provided. Set real values before starting the app."
-        )
     # Which LLM backend to use: "ollama" or "groq"
     LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
 
