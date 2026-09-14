@@ -57,7 +57,7 @@
       $('status-detail').textContent = i.cached ? 'Using the backend health-check cache.' : 'Fresh health check completed.';
     } catch (err) { $('stat-agent').textContent = 'Offline'; $('stat-infra').textContent = 'Unavailable'; $('status-detail').textContent = 'Could not reach the backend.'; }
   }
-  $('login-form').onsubmit = async e => { e.preventDefault(); const error = $('login-error'); error.textContent = ''; const response = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('login-username').value, password:$('login-password').value})}); if (!response.ok) { error.textContent = 'Invalid username or password'; return; } showApp(); init().catch(err => addMessage('assistant', `Unable to connect: ${err.message}`)); };
+  $('login-form').onsubmit = async e => { e.preventDefault(); const error = $('login-error'); const form = $('login-form'); error.textContent = ''; form.classList.add('is-loading'); const response = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('login-username').value, password:$('login-password').value})}); form.classList.remove('is-loading'); if (!response.ok) { error.textContent = 'Invalid username or password'; form.classList.add('has-error'); setTimeout(() => form.classList.remove('has-error'), 450); return; } showApp(); init().catch(err => addMessage('assistant', `Unable to connect: ${err.message}`)); };
   async function clearChat() {
     if (!conversationId || !confirm('Clear this chat?')) return;
     await fetch(`/api/conversations/${conversationId}`, {method:'DELETE'});
