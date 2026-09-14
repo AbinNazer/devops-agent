@@ -10,6 +10,7 @@
     html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
     html = html.replace(/^### (.*)$/gm, '<h4>$1</h4>').replace(/^## (.*)$/gm, '<h3>$1</h3>').replace(/^# (.*)$/gm, '<h2>$1</h2>');
     html = html.replace(/^\|(.+)\|\n\|[-: |]+\|\n((?:\|.*\|\n?)+)/gm, (_, head, rows) => `<table><thead><tr>${head.split('|').filter(Boolean).map(x => `<th>${x.trim()}</th>`).join('')}</tr></thead><tbody>${rows.trim().split('\n').map(row => `<tr>${row.split('|').filter(Boolean).map(x => `<td>${x.trim()}</td>`).join('')}</tr>`).join('')}</tbody></table>`);
+    html = html.replace(/&lt;(br|ul|\/ul|li|\/li)&gt;/g, '<$1>');
     html = html.replace(/^[-*] (.*)$/gm, '<li>$1</li>').replace(/(?:<li>.*<\/li>\n?)+/g, x => `<ul>${x}</ul>`);
     html = html.replace(/\*\*(.+?)\*\*/g, '<strong>$1</strong>').replace(/`([^`]+)`/g, '<code>$1</code>');
     return html.replace(/\n{2,}/g, '<br><br>').replace(/\n/g, '<br>');
