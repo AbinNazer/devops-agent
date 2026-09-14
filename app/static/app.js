@@ -71,11 +71,15 @@
   $('status-refresh').onclick = loadStatus;
   $('back-chat').onclick = () => { $('status-panel').hidden = true; document.querySelector('.chat-panel').hidden = false; };
   document.addEventListener('click', e => { if (!e.target.closest('.menu-wrap')) $('menu').hidden = true; });
-  function keepInputVisible(input) { setTimeout(() => input.scrollIntoView({block:'nearest', inline:'nearest'}), 250); }
+  function keepChatAtBottom() { messages.scrollTop = messages.scrollHeight; }
+  function keepInputVisible(input) {
+    input.scrollIntoView({block:'nearest', inline:'nearest'});
+    [40, 180, 420].forEach(delay => setTimeout(keepChatAtBottom, delay));
+  }
   $('message').addEventListener('focus', e => keepInputVisible(e.target));
   $('message').addEventListener('input', () => { messages.scrollTop = messages.scrollHeight; });
   function syncViewportHeight() { const height = window.visualViewport ? window.visualViewport.height : window.innerHeight; document.documentElement.style.setProperty('--viewport-height', `${height}px`); }
-  syncViewportHeight(); window.addEventListener('resize', syncViewportHeight); if (window.visualViewport) window.visualViewport.addEventListener('resize', syncViewportHeight);
+  syncViewportHeight(); window.addEventListener('resize', syncViewportHeight); if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { syncViewportHeight(); if (document.activeElement === $('message')) keepChatAtBottom(); });
   fetch('/api/auth/me').then(r => r.json()).then(data => { if (data.authenticated) { showApp(); return init(); } $('login-screen').hidden = false; appShell.hidden = true; }).catch(() => { $('login-screen').hidden = false; appShell.hidden = true; });
   if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/static/sw.js').catch(() => {}));
 })();
