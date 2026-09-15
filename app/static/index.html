@@ -11,14 +11,15 @@
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.svg">
-  <link rel="stylesheet" href="/static/app.css?v=12">
+  <link rel="stylesheet" href="/static/app.css?v=21">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
     <form id="login-form" class="login-card">
-      <div class="login-mark">⌁</div><p class="login-eyebrow">SECURE OPS CONSOLE</p><h1>JARVIS // OPS</h1><p class="login-subtitle">Authenticate to access your infrastructure workspace.</p><label>Username<input id="login-username" autocomplete="username" required></label>
-      <label>Password<input id="login-password" type="password" autocomplete="current-password" required></label>
-      <button type="submit">LOGIN</button><p id="login-error" role="alert"></p>
+      <div class="login-mark">⌁</div><p class="login-eyebrow">SECURE OPS CONSOLE</p><h1>JARVIS // OPS</h1><p class="login-subtitle">Sign in to your infrastructure workspace.</p><label>Username<input id="login-username" autocomplete="username" required></label><label>Password<input id="login-password" type="password" autocomplete="current-password" required></label><button type="submit">LOGIN</button><button type="button" class="secondary-login" id="register-toggle">Create account</button><p id="login-error" role="alert"></p>
+    </form>
+    <form id="register-form" class="login-card" hidden>
+      <button type="button" class="auth-back" id="register-back">← Back to login</button><div class="login-mark">✦</div><p class="login-eyebrow">NEW WORKSPACE IDENTITY</p><h1>Create account</h1><p class="login-subtitle">Set up your operator profile to continue.</p><div class="form-row"><label>First name<input id="register-first-name" autocomplete="given-name" required></label><label>Last name<input id="register-last-name" autocomplete="family-name" required></label></div><label>Email<input id="register-email" type="email" autocomplete="email" required></label><label>Username<input id="register-username" autocomplete="username" minlength="3" required></label><label>Password<input id="register-password" type="password" autocomplete="new-password" minlength="8" required></label><label>Confirm password<input id="register-confirm-password" type="password" autocomplete="new-password" minlength="8" required></label><button type="submit">CREATE ACCOUNT</button><p id="register-error" role="alert"></p>
     </form>
   </section>
   <main class="app-shell">
@@ -29,6 +30,7 @@
           <button id="clear-chat" type="button">Clear chat</button>
           <label class="menu-provider">Provider<select id="provider"></select></label>
           <button id="menu-status" type="button">Infrastructure status</button>
+          <button id="menu-settings" type="button">Settings</button>
           <button id="menu-terminal" type="button">Open terminal</button>
           <button id="logout" type="button">Log out</button>
         </div>
@@ -43,6 +45,14 @@
           <button class="send-button" aria-label="Send message">➤</button>
         </form>
       </section>
+      <section id="settings-panel" class="settings-panel" hidden aria-label="Settings">
+        <div class="status-heading"><div><button id="settings-back" class="back-button" type="button">← Chat</button><span class="eyebrow">CONTROL CENTER</span><h2>Settings</h2></div></div>
+        <div class="settings-grid">
+          <article class="settings-card"><span class="eyebrow">ACCOUNT</span><h3>Appearance</h3><label>Theme<select id="setting-theme"><option value="dark">Aurora dark</option><option value="light">Bright light</option></select></label><button id="save-user-settings" class="small-button" type="button">Apply theme</button><span id="user-settings-status" class="settings-status" role="status"></span></article>
+          <article class="settings-card"><span class="eyebrow">ORGANIZATION</span><h3>Workspace defaults</h3><label>Timezone<input id="setting-timezone" placeholder="Asia/Kolkata"></label><button id="save-org-settings" class="small-button" type="button">Save workspace</button><span id="org-settings-status" class="settings-status" role="status"></span></article>
+          <article class="settings-card provider-settings-card"><span class="eyebrow">AI PROVIDERS</span><h3>Provider control</h3><label>Primary provider<select id="setting-primary-provider"></select></label><label>Primary model<select id="setting-primary-model"></select></label><label class="check-row"><input id="setting-fallback" type="checkbox"> Allow fallback providers</label><div id="settings-providers" class="provider-list">Loading provider status…</div><label>Save an API key securely<input id="setting-provider-key" type="password" autocomplete="new-password" placeholder="Only enter a new key"></label><button id="save-provider-settings" class="small-button" type="button">Save provider settings</button><small>Keys are encrypted on the server and never displayed. Leave the key blank to keep the existing value.</small><span id="provider-settings-status" class="settings-status" role="status"></span></article>
+        </div>
+      </section>
       <section id="status-panel" class="status-panel" hidden aria-label="Infrastructure status">
         <div class="status-heading"><div><button id="back-chat" class="back-button" type="button">← Chat</button><span class="eyebrow">LIVE OVERVIEW</span><h2>Infrastructure</h2></div><button id="status-refresh" class="small-button" type="button">Refresh</button></div>
         <div class="status-grid"><article class="status-card"><span>Agent</span><strong id="stat-agent">Checking…</strong></article><article class="status-card"><span>Infrastructure</span><strong id="stat-infra">Not checked</strong></article><article class="status-card"><span>Last check</span><strong id="stat-time">—</strong></article></div>
@@ -50,6 +60,6 @@
       </section>
     </section>
   </main>
-  <script src="/static/app.js?v=12"></script>
+  <script src="/static/app.js?v=20"></script>
 </body>
 </html>

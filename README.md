@@ -4,11 +4,73 @@ JARVIS is a security-controlled DevOps assistant. It can inspect local and remot
 
 > Development foundation, not production SaaS. Do not expose the API publicly or use this as a replacement for reviewed operational procedures.
 
+## Current project status
+
+JARVIS is currently a single-installation DevOps agent with a responsive web
+UI, PWA support, provider selection, SSE chat, infrastructure status, and a
+separate WebSocket/PTy terminal. The SaaS work is being added incrementally.
+
+Completed foundations:
+
+- Architecture documentation in [`docs/current-architecture.md`](docs/current-architecture.md).
+- Authenticated session identity and Owner/Admin/Engineer/Viewer RBAC contracts.
+- Non-persistent user, organization, settings, and infrastructure repository
+  interfaces with ownership checks.
+- Reviewable PostgreSQL schema draft in
+  [`db/migrations/001_saas_foundation.sql`](db/migrations/001_saas_foundation.sql).
+- Authenticated user/organization Settings API and current Settings UI.
+- Optional PostgreSQL-backed web sessions with expiry.
+- Password registration using server-side `scrypt` hashes.
+- Encrypted secret-storage primitive using a server-side Fernet key.
+- Provider/model catalog and provider preference APIs.
+- Organization-owned PostgreSQL conversation repository and compatibility
+  cutover support when `DATABASE_ENABLED=true`.
+
+The PostgreSQL migration is not run automatically. The existing `memory.db`
+and web conversation files under `sessions/` are separate and must not be
+deleted, reset, or migrated as part of normal startup.
+
+Google OAuth is not implemented yet. The current account flow supports the
+configured server account and local PostgreSQL-backed username/password
+registration when database mode is enabled. A complete provider-management
+form and full RBAC enforcement across every legacy route are also still under
+development.
+
+### Optional PostgreSQL persistence
+
+PostgreSQL is separate from `memory.db` and is currently opt-in. Install the
+dependency, set a private connection URL, review the migration, and apply it
+explicitly:
+
+```bash
+pip install -r requirements.txt
+export DATABASE_URL='postgresql://user:password@host:5432/jarvis'
+export ENCRYPTION_KEY="$(python -c 'from cryptography.fernet import Fernet; print(Fernet.generate_key().decode())')"
+export DATABASE_ENABLED=true
+python scripts/migrate_postgres.py --database-url "$DATABASE_URL"
+```
+
+The application does not connect or migrate automatically. Never commit the
+URL, and do not run the migration against production without backups and a
+rollback plan.
+
+`ENCRYPTION_KEY` is required for encrypted secrets and must be backed up
+securely outside the repository. Losing it makes encrypted provider
+credentials unrecoverable. The current PostgreSQL session store is enabled
+only when `DATABASE_ENABLED=true`; otherwise the existing in-memory session
+fallback remains active.
+
+When `DATABASE_ENABLED=true`, apply the migration before starting the server.
+This enables PostgreSQL-backed sessions and new organization-owned
+conversation persistence. Existing JSON conversations are not automatically
+migrated or deleted. When it is `false`, the legacy JSON conversation store
+and in-memory session fallback remain active.
+
 ## Architecture
 
 ```text
-Desktop UI (React/Tauri)
-  Chat, conversations, providers, tasks, infrastructure, voice
+Responsive web/PWA UI
+  Chat, conversations, providers, settings, status, terminal
                          │ HTTP / SSE
                          ▼
 FastAPI API / Control Plane
@@ -37,14 +99,14 @@ Security boundary
 
 | Layer | Responsibility |
 |---|---|
-| `desktop/` | ChatGPT-style desktop UI and frontend state/services. |
-| `app/api/` | REST/SSE API for chat, providers, conversations, voice, tasks, and control-plane endpoints. |
+| `app/static/` | Responsive web/PWA UI, chat, settings, status, and standalone terminal client. |
+| `app/api/` | REST/SSE API for chat, providers, conversations, settings, voice, tasks, and control-plane endpoints. |
 | `app/agent.py`, `app/control/` | Reasoning and controlled operation lifecycle. |
 | `app/memory/`, `app/intelligence/` | Persistent local memory, retrieval, incident analysis, and recommendations. |
 | `app/llm_router.py` | Provider selection, context preservation, cooldown, and safe failover. |
 | `app/tools/`, `app/tool_registry.py` | Explicit, validated infrastructure operations. |
 | `app/ssh_whitelist.py` | Strict allowed-command validation for SSH access. |
-| `app/control_plane/` | Organizations, projects, infrastructure, workers, enrollment, and heartbeat ownership. |
+| `app/control_plane/` | Existing control-plane services for organization/project/infrastructure/worker workflows. |
 | `worker/` | Capability declarations and structured task protocol for a future outbound worker. |
 
 ## Security model
@@ -83,19 +145,8 @@ pip install --upgrade pip
 pip install -r requirements.txt
 ```
 
-The web API requires FastAPI and Uvicorn. If they are not already installed by your dependency file, install them into the same virtual environment:
-
-```bash
-pip install fastapi 'uvicorn[standard]'
-```
-
-Install desktop dependencies:
-
-```bash
-cd desktop
-npm install
-cd ..
-```
+The web API is served directly by FastAPI; the current UI is static and does
+not require a separate frontend build or Node.js installation.
 
 ## Environment configuration
 
@@ -193,20 +244,31 @@ uvicorn app.api.app:app --host 127.0.0.1 --port 8001 --reload
 
 Open API documentation at `http://127.0.0.1:8001/docs` while the backend is running. Keep `127.0.0.1` for development; do not bind publicly without authentication, TLS, and a reverse proxy.
 
-### Desktop UI
+### Web/PWA UI
 
-In a second terminal:
+Open `http://127.0.0.1:8001/` after starting the API. On a phone, use the
+browser's Add to Home Screen action. The terminal opens as a separate
+full-screen page from the application menu.
+
+The UI includes responsive two-sided chat bubbles, streaming responses, an
+animated assistant avatar, provider/settings controls, Aurora Dark and Bright
+Light themes, infrastructure status, logout, and the local terminal view.
+Static UI changes do not require a database migration.
+
+### Updating a VPS UI-only deployment
+
+When PostgreSQL is disabled (`DATABASE_ENABLED=false`), pull UI updates and
+restart the service:
 
 ```bash
-cd ~/ai/devops-agent/desktop
-npm run dev
+cd /var/www/k3s/devops-agent
+git pull
+sudo systemctl restart devops-agent
 ```
 
-For a production-style frontend build check:
-
-```bash
-npm run build
-```
+No migration is needed for CSS, JavaScript, HTML, or PWA-cache changes. If a
+phone home-screen app still shows an older version, close it completely and
+open it again; the static asset cache version is bumped with UI releases.
 
 ## Configure infrastructure
 
@@ -373,4 +435,4 @@ Do not run Ollama, Qdrant, MySQL, Redis, Whisper, Kokoro, Docker/K3s, and a larg
 
 ## Future production hardening
 
-Before any public or customer-facing deployment, add authenticated users/RBAC, MySQL persistence, Redis-backed dispatch, TLS/mTLS, secret manager/KMS, token rotation, rate limiting, audit retention, backup/recovery, worker sandboxing, signed updates, centralized observability, and a reviewed deployment model.
+Before any public or customer-facing deployment, complete persistent PostgreSQL-backed users/RBAC, Redis-backed dispatch where needed, TLS/mTLS, secret manager/KMS, token rotation, rate limiting, audit retention, backup/recovery, worker sandboxing, signed updates, centralized observability, and a reviewed deployment model.
