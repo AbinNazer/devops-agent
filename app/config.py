@@ -9,11 +9,22 @@ load_dotenv()  # loads .env if present; harmless if it isn't
 
 
 class Config:
+    # Future SaaS database. The current application does not connect to this
+    # value yet; it is intentionally configuration-only until migrations are
+    # reviewed and a PostgreSQL adapter is implemented.
+    DATABASE_URL = os.environ.get("DATABASE_URL", "")
+    DATABASE_ENABLED = os.environ.get("DATABASE_ENABLED", "false").lower() == "true"
+    ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")
     # Empty by default — deliberately NOT crashing at import time (this class
     # is imported by every module and CI, which never has these set). Instead,
     # app/auth.py.authenticate() refuses ALL logins when either is empty.
     WEB_USERNAME = os.environ.get("JARVIS_WEB_USERNAME", "")
     WEB_PASSWORD = os.environ.get("JARVIS_WEB_PASSWORD", "")
+    COOKIE_SECURE = os.environ.get("JARVIS_COOKIE_SECURE", "false").lower() == "true"
+    EMAIL_VERIFICATION_REQUIRED = os.environ.get("JARVIS_EMAIL_VERIFICATION_REQUIRED", "false").lower() == "true"
+    ALLOWED_ORIGINS = [item.strip() for item in os.environ.get("JARVIS_ALLOWED_ORIGINS", "http://127.0.0.1:8001,http://localhost:8001").split(",") if item.strip()]
+    LOGIN_RATE_LIMIT = int(os.environ.get("JARVIS_LOGIN_RATE_LIMIT", "10"))
+    LOGIN_RATE_WINDOW_SECONDS = int(os.environ.get("JARVIS_LOGIN_RATE_WINDOW_SECONDS", "300"))
     # Which LLM backend to use: "ollama" or "groq"
     LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
 

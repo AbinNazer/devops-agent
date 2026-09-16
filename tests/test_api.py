@@ -12,11 +12,20 @@ from unittest.mock import patch, MagicMock
 from app.api.app import app
 from app.api.conversation_store import ConversationStore
 from app.api.task_manager import TaskManager
+from app.config import Config
 
 
 @pytest.fixture
-def client():
+def client(monkeypatch):
     """Create a test client with mocked LLM router."""
+    # These API tests exercise the legacy in-memory conversation endpoints.
+    # Keep them independent from a developer's local .env, which may enable
+    # PostgreSQL and therefore require an authenticated database session.
+    monkeypatch.setattr(Config, "DATABASE_ENABLED", False)
+    monkeypatch.setattr(Config, "DATABASE_URL", "")
+    # Do not load optional speech models during API tests; a local .env may
+    # enable voice and make TestClient startup depend on heavyweight models.
+    monkeypatch.setattr(Config, "VOICE_ENABLED", False)
     with patch("app.api.app.get_router") as mock_get_router:
         mock_router = MagicMock()
         mock_router.name = "MockRouter"

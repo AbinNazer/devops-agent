@@ -1,0 +1,18 @@
+{
+  "tool": "Example Tool",
+  "version": "",
+  "researched_at": "2026-09-16T10:01:22.637174+00:00",
+  "sources": [
+    {
+      "title": "Docs",
+      "url": "https://example.com",
+      "source": "example.com",
+      "snippet": "Read-only notes",
+      "documentation": {
+        "success": false,
+        "url": "https://example.com",
+        "error": "Documentation could not be verified"
+      }
+    }
+  ]
+}

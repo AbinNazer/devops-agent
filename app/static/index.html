@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.svg">
-  <link rel="stylesheet" href="/static/app.css?v=21">
+  <link rel="stylesheet" href="/static/app.css?v=22">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
@@ -47,11 +47,14 @@
       </section>
       <section id="settings-panel" class="settings-panel" hidden aria-label="Settings">
         <div class="status-heading"><div><button id="settings-back" class="back-button" type="button">← Chat</button><span class="eyebrow">CONTROL CENTER</span><h2>Settings</h2></div></div>
-        <div class="settings-grid">
+        <div class="settings-layout"><nav class="settings-nav" aria-label="Settings sections"><button class="settings-nav-item active" data-settings-section="general" type="button">General</button><button class="settings-nav-item" data-settings-section="infrastructure" type="button">Configure infrastructure</button><button class="settings-nav-item" data-settings-section="providers" type="button">AI providers</button><button class="settings-nav-item" data-settings-section="research" type="button">Web research & skills</button></nav><div class="settings-content">
+        <div class="settings-grid" data-settings-section-content="general">
           <article class="settings-card"><span class="eyebrow">ACCOUNT</span><h3>Appearance</h3><label>Theme<select id="setting-theme"><option value="dark">Aurora dark</option><option value="light">Bright light</option></select></label><button id="save-user-settings" class="small-button" type="button">Apply theme</button><span id="user-settings-status" class="settings-status" role="status"></span></article>
           <article class="settings-card"><span class="eyebrow">ORGANIZATION</span><h3>Workspace defaults</h3><label>Timezone<input id="setting-timezone" placeholder="Asia/Kolkata"></label><button id="save-org-settings" class="small-button" type="button">Save workspace</button><span id="org-settings-status" class="settings-status" role="status"></span></article>
-          <article class="settings-card provider-settings-card"><span class="eyebrow">AI PROVIDERS</span><h3>Provider control</h3><label>Primary provider<select id="setting-primary-provider"></select></label><label>Primary model<select id="setting-primary-model"></select></label><label class="check-row"><input id="setting-fallback" type="checkbox"> Allow fallback providers</label><div id="settings-providers" class="provider-list">Loading provider status…</div><label>Save an API key securely<input id="setting-provider-key" type="password" autocomplete="new-password" placeholder="Only enter a new key"></label><button id="save-provider-settings" class="small-button" type="button">Save provider settings</button><small>Keys are encrypted on the server and never displayed. Leave the key blank to keep the existing value.</small><span id="provider-settings-status" class="settings-status" role="status"></span></article>
-        </div>
+        </div></div>
+        <div class="settings-section" data-settings-section-content="infrastructure" hidden><div class="settings-section-heading"><span class="eyebrow">INFRASTRUCTURE TARGETS</span><h3>Connect your environments</h3><p>Add VPS servers or AWS accounts as organization-owned targets. Credentials are not collected here.</p></div><form id="infrastructure-form" class="target-form"><label>Name<input id="target-name" required placeholder="Production VPS"></label><label>Type<select id="target-kind"><option value="vps">VPS</option><option value="aws">AWS</option></select></label><label id="target-host-label">Host / IP<input id="target-host" placeholder="93.127.167.39"></label><label>Port<input id="target-port" type="number" placeholder="22"></label><label>Username<input id="target-username" placeholder="root"></label><label id="target-region-label" hidden>Region<input id="target-region" placeholder="ap-south-1"></label><label id="target-endpoint-label" hidden>Endpoint<input id="target-endpoint" placeholder="https://... (optional)"></label><label class="target-wide">Notes<textarea id="target-notes" rows="2" placeholder="Production, monitoring, owner…"></textarea></label><button class="small-button" type="submit">Add infrastructure</button><span id="target-status" class="settings-status" role="status"></span></form><div id="infrastructure-targets" class="target-list"></div></div>
+        <div class="settings-section" data-settings-section-content="providers" hidden><div class="settings-grid"><article class="settings-card provider-settings-card"><span class="eyebrow">AI PROVIDERS</span><h3>Provider control</h3><label>Primary provider<select id="setting-primary-provider"></select></label><label>Primary model<select id="setting-primary-model"></select></label><label class="check-row"><input id="setting-fallback" type="checkbox"> Allow fallback providers</label><div id="settings-providers" class="provider-list">Loading provider status…</div><label>Save an API key securely<input id="setting-provider-key" type="password" autocomplete="new-password" placeholder="Only enter a new key"></label><button id="save-provider-settings" class="small-button" type="button">Save provider settings</button><small>Keys are encrypted on the server and never displayed. Leave the key blank to keep the existing value.</small><span id="provider-settings-status" class="settings-status" role="status"></span></article></div></div>
+        <div class="settings-section" data-settings-section-content="research" hidden><div class="settings-section-heading"><span class="eyebrow">KNOWLEDGE ENGINE</span><h3>Research a DevOps tool</h3><p>Search official documentation and save a reusable, source-tracked skill. Research never installs or executes anything.</p></div><form id="research-form" class="target-form"><label>Tool or query<input id="research-query" required placeholder="Redis Streams or Kubernetes"></label><label>Known version (optional)<input id="research-version" placeholder="7.2"></label><label class="check-row"><input id="research-refresh" type="checkbox"> Refresh existing skill</label><button class="small-button" type="submit">Research tool</button></form><p id="research-status" class="settings-status" role="status"></p><div id="research-results" class="research-results"></div></div></div>
       </section>
       <section id="status-panel" class="status-panel" hidden aria-label="Infrastructure status">
         <div class="status-heading"><div><button id="back-chat" class="back-button" type="button">← Chat</button><span class="eyebrow">LIVE OVERVIEW</span><h2>Infrastructure</h2></div><button id="status-refresh" class="small-button" type="button">Refresh</button></div>
@@ -60,6 +63,6 @@
       </section>
     </section>
   </main>
-  <script src="/static/app.js?v=20"></script>
+  <script src="/static/app.js?v=21"></script>
 </body>
 </html>

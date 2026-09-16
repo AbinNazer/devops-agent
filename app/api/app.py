@@ -18,6 +18,7 @@ import logging
 import uuid
 import time
 import os
+import re
 from datetime import datetime
 from typing import Optional
 
@@ -44,7 +45,12 @@ from app.api.task_manager import get_task_manager
 from app.api.voice import get_stt, get_tts
 from app.control_plane import get_control_plane
 from app.terminal import router as terminal_router
-from app.auth import authenticate, create_session, delete_session, valid_session
+from app.auth import authenticate, create_session, delete_session, delete_all_sessions, valid_session, session_user, hash_password, verify_password
+from app.tenancy import registry, new_user_id
+from app.repositories import saas_repository
+from app.provider_registry import catalog as provider_catalog
+from app.conversation_repository import PostgresConversationRepository, ConversationOwnershipError
+from app.research import web_search, learn_tool, SKILLS_DIR
 
 logger = logging.getLogger("api")
 
@@ -62,11 +68,40 @@ def warm_voice_models():
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["http://localhost:5174", "http://127.0.0.1:5174"],
+    allow_origins=Config.ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+_security_attempts: dict[str, list[float]] = {}
+
+
+def _rate_limited(key: str, limit: int, window: int) -> bool:
+    now = time.monotonic()
+    attempts = [stamp for stamp in _security_attempts.get(key, []) if now - stamp < window]
+    if len(attempts) >= limit:
+        _security_attempts[key] = attempts
+        return True
+    attempts.append(now)
+    _security_attempts[key] = attempts
+    return False
+
+
+@app.middleware("http")
+async def security_headers(request: Request, call_next):
+    origin = request.headers.get("origin")
+    if origin and origin not in Config.ALLOWED_ORIGINS and request.method not in {"GET", "HEAD", "OPTIONS"}:
+        return Response(content='{"detail":"Origin not allowed"}', status_code=403, media_type="application/json")
+    response = await call_next(request)
+    response.headers.setdefault("X-Content-Type-Options", "nosniff")
+    response.headers.setdefault("X-Frame-Options", "DENY")
+    response.headers.setdefault("Referrer-Policy", "strict-origin-when-cross-origin")
+    response.headers.setdefault("Permissions-Policy", "camera=(), geolocation=(), payment=()")
+    response.headers.setdefault("Content-Security-Policy", "default-src 'self'; connect-src 'self' ws: wss:; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'")
+    if Config.COOKIE_SECURE:
+        response.headers.setdefault("Strict-Transport-Security", "max-age=31536000; includeSubDomains")
+    return response
 
 # Serve static files (terminal.js)
 STATIC_DIR = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', 'static'))
@@ -86,24 +121,312 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class PasswordChangeRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class RegisterRequest(BaseModel):
+    first_name: str
+    last_name: str
+    email: str
+    username: str
+    password: str
+    confirm_password: str
+
+
+class SettingsUpdate(BaseModel):
+    values: dict = {}
+
+
+class ProviderCredentialUpdate(BaseModel):
+    api_key: str
+
+
+class ResearchRequest(BaseModel):
+    query: str = ""
+    tool: str = ""
+    version: str = ""
+    refresh: bool = False
+
+
+class InfrastructureTarget(BaseModel):
+    name: str
+    kind: str
+    host: str = ""
+    port: int | None = None
+    username: str = ""
+    region: str = ""
+    endpoint: str = ""
+    notes: str = ""
+
+
+class InfrastructureTargetUpdate(InfrastructureTarget):
+    id: str | None = None
+
+
 @app.post("/api/auth/login")
-def login(body: LoginRequest, response: Response):
-    if not authenticate(body.username, body.password):
+def login(body: LoginRequest, response: Response, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_limited(f"login:{client_ip}", Config.LOGIN_RATE_LIMIT, Config.LOGIN_RATE_WINDOW_SECONDS):
+        raise HTTPException(status_code=429, detail="Too many authentication attempts. Try again later.")
+    valid = authenticate(body.username, body.password)
+    if Config.DATABASE_ENABLED and Config.DATABASE_URL:
+        from app.postgres import connect
+        with connect(Config.DATABASE_URL) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT password_hash, status FROM users WHERE username = %s", (body.username,))
+                row = cursor.fetchone()
+                if row:
+                    valid = row[1] == "active" and bool(row[0]) and verify_password(body.password, row[0])
+    if not valid:
         raise HTTPException(status_code=401, detail="Invalid username or password")
-    response.set_cookie("jarvis_session", create_session(), httponly=True, samesite="lax", secure=False, max_age=86400)
+    response.set_cookie("jarvis_session", create_session(body.username), httponly=True, samesite="lax", secure=Config.COOKIE_SECURE, max_age=86400, path="/")
+    return {"authenticated": True}
+
+
+@app.post("/api/auth/register")
+def register(body: RegisterRequest, response: Response, request: Request):
+    client_ip = request.client.host if request.client else "unknown"
+    if _rate_limited(f"register:{client_ip}", 5, Config.LOGIN_RATE_WINDOW_SECONDS):
+        raise HTTPException(status_code=429, detail="Too many account attempts. Try again later.")
+    if len(body.first_name.strip()) < 1 or len(body.last_name.strip()) < 1:
+        raise HTTPException(status_code=400, detail="First and last name are required")
+    if "@" not in body.email or len(body.email.strip()) < 5:
+        raise HTTPException(status_code=400, detail="Enter a valid email address")
+    if len(body.username.strip()) < 3 or len(body.password) < 8:
+        raise HTTPException(status_code=400, detail="Username must have 3 characters and password 8 characters")
+    if body.password != body.confirm_password:
+        raise HTTPException(status_code=400, detail="Passwords do not match")
+    if not Config.DATABASE_ENABLED or not Config.DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Registration requires database-backed accounts")
+    from app.postgres import connect
+    user_id = new_user_id(body.username.strip())
+    with connect(Config.DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT 1 FROM users WHERE username = %s OR lower(email) = lower(%s)", (body.username.strip(), body.email.strip()))
+            if cursor.fetchone(): raise HTTPException(status_code=409, detail="Username or email already exists")
+            cursor.execute("INSERT INTO users (id, username, first_name, last_name, email, password_hash) VALUES (%s, %s, %s, %s, %s, %s)", (user_id, body.username.strip(), body.first_name.strip(), body.last_name.strip(), body.email.strip(), hash_password(body.password)))
+        connection.commit()
+    response.set_cookie("jarvis_session", create_session(body.username.strip()), httponly=True, samesite="lax", secure=Config.COOKIE_SECURE, max_age=86400, path="/")
     return {"authenticated": True}
 
 
 @app.get("/api/auth/me")
 def auth_me(request: Request):
-    return {"authenticated": valid_session(request.cookies.get("jarvis_session"))}
+    token = request.cookies.get("jarvis_session")
+    username = session_user(token)
+    if not username:
+        return {"authenticated": False}
+    context = registry.context_for(new_user_id(username))
+    return {"authenticated": True, "user_id": context.user_id, "organization": {"id": context.organization.id, "name": context.organization.name}, "role": context.role.value, "permissions": sorted(context.can("*") and {"*"} or {p for p in ("infrastructure.read", "terminal.access", "incident.manage", "settings.manage", "team.manage") if context.can(p)})}
 
 
 @app.post("/api/auth/logout")
 def logout(request: Request, response: Response):
     delete_session(request.cookies.get("jarvis_session"))
-    response.delete_cookie("jarvis_session")
+    response.delete_cookie("jarvis_session", path="/")
     return {"authenticated": False}
+
+
+@app.post("/api/auth/logout-all")
+def logout_all(request: Request, response: Response):
+    username = session_user(request.cookies.get("jarvis_session"))
+    if username:
+        delete_all_sessions(username)
+    response.delete_cookie("jarvis_session", path="/")
+    return {"authenticated": False}
+
+
+@app.post("/api/auth/password")
+def change_password(body: PasswordChangeRequest, request: Request):
+    username = session_user(request.cookies.get("jarvis_session"))
+    if not username or len(body.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Unable to change password")
+    if not Config.DATABASE_ENABLED or not Config.DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Password changes require database-backed accounts")
+    from app.postgres import connect
+    from app.tenancy import new_user_id
+    with connect(Config.DATABASE_URL) as connection:
+        with connection.cursor() as cursor:
+            cursor.execute("SELECT password_hash FROM users WHERE username = %s", (username,))
+            row = cursor.fetchone()
+            if not row or not row[0] or not verify_password(body.current_password, row[0]):
+                raise HTTPException(status_code=400, detail="Unable to change password")
+            cursor.execute("UPDATE users SET password_hash = %s WHERE id = %s", (hash_password(body.new_password), new_user_id(username)))
+        connection.commit()
+    delete_all_sessions(username)
+    return {"success": True, "message": "Password changed. Please sign in again."}
+
+
+@app.post("/api/research/search")
+def research_search(body: ResearchRequest, request: Request):
+    if not session_user(request.cookies.get("jarvis_session")):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return web_search(body.query)
+
+
+@app.post("/api/research/learn")
+def research_learn(body: ResearchRequest, request: Request):
+    if not session_user(request.cookies.get("jarvis_session")):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not body.tool.strip():
+        raise HTTPException(status_code=400, detail="tool is required")
+    return learn_tool(body.tool, body.refresh, body.version)
+
+
+@app.post("/api/research/learn/stream")
+async def research_learn_stream(body: ResearchRequest, request: Request):
+    if not session_user(request.cookies.get("jarvis_session")):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not body.tool.strip():
+        raise HTTPException(status_code=400, detail="tool is required")
+
+    async def events():
+        yield "event: research\ndata: " + json.dumps({"stage": "started", "tool": body.tool}) + "\n\n"
+        yield "event: research\ndata: " + json.dumps({"stage": "searching_official_docs"}) + "\n\n"
+        result = await asyncio.to_thread(learn_tool, body.tool, body.refresh, body.version)
+        yield "event: research\ndata: " + json.dumps({"stage": "completed" if result.get("success") else "failed", "result": result}) + "\n\n"
+
+    return StreamingResponse(events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+
+@app.get("/api/research/skills")
+def research_skills(request: Request):
+    if not session_user(request.cookies.get("jarvis_session")):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    return {"skills": [{"name": path.parent.name, "path": str(path.relative_to(SKILLS_DIR.parent))} for path in SKILLS_DIR.glob("*/SKILL.md")]} if SKILLS_DIR.exists() else {"skills": []}
+
+
+@app.post("/api/research/skills/{skill}/refresh")
+def refresh_research_skill(skill: str, request: Request):
+    if not session_user(request.cookies.get("jarvis_session")):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    if not re.fullmatch(r"[a-z0-9-]{1,60}", skill):
+        raise HTTPException(status_code=400, detail="Invalid skill name")
+    return learn_tool(skill.replace("-", " "), refresh=True)
+
+
+def _settings_identity(request: Request):
+    username = session_user(request.cookies.get("jarvis_session"))
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user_id = new_user_id(username)
+    context = registry.context_for(user_id)
+    if user_id not in saas_repository.users:
+        saas_repository.add_user(username, user_id=user_id)
+    if context.organization.id not in saas_repository.organizations:
+        saas_repository.add_organization(context.organization.name, user_id, context.organization.id)
+    if Config.DATABASE_ENABLED and Config.DATABASE_URL:
+        from app.postgres import connect
+        with connect(Config.DATABASE_URL) as connection:
+            with connection.cursor() as cursor:
+                cursor.execute("INSERT INTO users (id, username) VALUES (%s, %s) ON CONFLICT (id) DO NOTHING", (user_id, username))
+                cursor.execute("INSERT INTO organizations (id, name, owner_user_id) VALUES (%s, %s, %s) ON CONFLICT (id) DO NOTHING", (context.organization.id, context.organization.name, user_id))
+                cursor.execute("INSERT INTO organization_members (organization_id, user_id, role) VALUES (%s, %s, 'owner') ON CONFLICT (organization_id, user_id) DO NOTHING", (context.organization.id, user_id))
+                cursor.execute("INSERT INTO user_settings (user_id) VALUES (%s) ON CONFLICT (user_id) DO NOTHING", (user_id,))
+                cursor.execute("INSERT INTO organization_settings (organization_id) VALUES (%s) ON CONFLICT (organization_id) DO NOTHING", (context.organization.id,))
+            connection.commit()
+    return user_id, context.organization.id
+
+
+@app.get("/api/settings/user")
+def get_user_settings(request: Request):
+    user_id, _ = _settings_identity(request)
+    record = saas_repository.get_user_settings(user_id)
+    return {"scope": "user", "values": record.values, "updated_at": record.updated_at}
+
+
+@app.put("/api/settings/user")
+def update_user_settings(body: SettingsUpdate, request: Request):
+    user_id, _ = _settings_identity(request)
+    record = saas_repository.update_settings(saas_repository.get_user_settings(user_id), body.values)
+    return {"scope": "user", "values": record.values, "updated_at": record.updated_at}
+
+
+@app.get("/api/settings/organization")
+def get_organization_settings(request: Request):
+    _, organization_id = _settings_identity(request)
+    record = saas_repository.get_organization_settings(organization_id)
+    return {"scope": "organization", "values": record.values, "updated_at": record.updated_at}
+
+
+@app.put("/api/settings/organization")
+def update_organization_settings(body: SettingsUpdate, request: Request):
+    _, organization_id = _settings_identity(request)
+    record = saas_repository.update_settings(saas_repository.get_organization_settings(organization_id), body.values)
+    return {"scope": "organization", "values": record.values, "updated_at": record.updated_at}
+
+
+@app.get("/api/settings/infrastructure")
+def list_infrastructure_targets(request: Request):
+    """List organization-owned VPS/AWS connection metadata without secrets."""
+    _, organization_id = _settings_identity(request)
+    record = saas_repository.get_organization_settings(organization_id)
+    targets = record.values.get("infrastructure_targets", [])
+    return {"targets": targets}
+
+
+@app.post("/api/settings/infrastructure")
+def add_infrastructure_target(body: InfrastructureTargetUpdate, request: Request):
+    """Register a VPS, AWS account, or other infrastructure target."""
+    _, organization_id = _settings_identity(request)
+    if not body.name.strip() or body.kind not in {"vps", "aws"}:
+        raise HTTPException(status_code=400, detail="Name and a supported target type (vps or aws) are required")
+    record = saas_repository.get_organization_settings(organization_id)
+    targets = list(record.values.get("infrastructure_targets", []))
+    item = body.model_dump(exclude_none=True)
+    item["id"] = body.id or f"target_{uuid.uuid4().hex[:12]}"
+    item["name"] = item["name"].strip()
+    targets = [existing for existing in targets if existing.get("id") != item["id"]]
+    targets.append(item)
+    saas_repository.update_settings(record, {"infrastructure_targets": targets})
+    return {"target": item, "targets": targets}
+
+
+@app.delete("/api/settings/infrastructure/{target_id}")
+def delete_infrastructure_target(target_id: str, request: Request):
+    _, organization_id = _settings_identity(request)
+    record = saas_repository.get_organization_settings(organization_id)
+    targets = [item for item in record.values.get("infrastructure_targets", []) if item.get("id") != target_id]
+    saas_repository.update_settings(record, {"infrastructure_targets": targets})
+    return {"targets": targets}
+
+
+@app.get("/api/settings/providers")
+def provider_settings(request: Request):
+    user_id, _ = _settings_identity(request)
+    configured = {name for name, key in (("groq", Config.GROQ_API_KEY), ("openai", Config.OPENAI_API_KEY), ("gemini", Config.GEMINI_API_KEY), ("anthropic", Config.ANTHROPIC_API_KEY)) if key}
+    configured.add("ollama") if Config.OLLAMA_HOST else None
+    preferences = saas_repository.get_user_settings(user_id).values.get("provider_preferences", {})
+    return {"providers": [{**item, "configured": item["id"] in configured, "enabled": preferences.get("enabled", {}).get(item["id"], True)} for item in provider_catalog()], "preferences": preferences}
+
+
+@app.put("/api/settings/providers")
+def update_provider_settings(body: SettingsUpdate, request: Request):
+    user_id, _ = _settings_identity(request)
+    allowed = {"primary_provider", "primary_model", "fallback_enabled", "enabled"}
+    values = {key: value for key, value in body.values.items() if key in allowed}
+    record = saas_repository.get_user_settings(user_id)
+    current = record.values.get("provider_preferences", {})
+    current.update(values)
+    saas_repository.update_settings(record, {"provider_preferences": current})
+    return {"preferences": current}
+
+
+@app.put("/api/settings/providers/{provider_id}/credential")
+def save_provider_credential(provider_id: str, body: ProviderCredentialUpdate, request: Request):
+    user_id, _ = _settings_identity(request)
+    valid_ids = {item["id"] for item in provider_catalog()}
+    if provider_id not in valid_ids:
+        raise HTTPException(status_code=400, detail="Unknown provider")
+    if not body.api_key.strip():
+        raise HTTPException(status_code=400, detail="API key is required")
+    if not Config.DATABASE_ENABLED or not Config.DATABASE_URL:
+        raise HTTPException(status_code=503, detail="Persistent secret storage is not enabled")
+    from app.secret_store import EncryptedSecretStore
+    EncryptedSecretStore(Config.DATABASE_URL).put(user_id, f"provider:{provider_id}:api_key", body.api_key)
+    return {"provider": provider_id, "configured": True, "masked_key": "••••••••"}
 
 # ── State ──────────────────────────────────────────────────────
 
@@ -118,6 +441,25 @@ def get_router() -> LLMRouter:
     if _router is None:
         _router = build_router(Config)
     return _router
+
+
+def _pg_repository(request: Request) -> PostgresConversationRepository | None:
+    if not Config.DATABASE_ENABLED or not Config.DATABASE_URL:
+        return None
+    _user_id, organization_id = _settings_identity(request)
+    return PostgresConversationRepository(Config.DATABASE_URL)
+
+
+def _pg_owner(request: Request) -> tuple[str, str]:
+    user_id, organization_id = _settings_identity(request)
+    return user_id, organization_id
+
+
+def _pg_model(data: dict) -> Conversation:
+    messages = []
+    for item in data.get("messages", []):
+        messages.append(ChatMessage(id=item["id"], role=MessageRole(item["role"]), content=item.get("content", ""), provider=item.get("provider"), timestamp=item.get("created_at") or datetime.utcnow()))
+    return Conversation(id=data["id"], title=data["title"], provider=data["provider"], created_at=data.get("created_at") or datetime.utcnow(), updated_at=data.get("updated_at") or datetime.utcnow(), messages=messages)
 
 
 def _build_agent(provider_override: Optional[str] = None) -> Agent:
@@ -257,12 +599,21 @@ def switch_provider(req: ProviderSwitchRequest):
 # ── Conversations ──────────────────────────────────────────────
 
 @app.get("/api/conversations", response_model=list[ConversationSummary])
-def list_conversations():
+def list_conversations(request: Request):
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        rows = repo.list(organization_id, user_id)
+        return [ConversationSummary(id=r["id"], title=r["title"], created_at=r["created_at"], updated_at=r["updated_at"], message_count=0) for r in rows]
     return get_store().list_all()
 
 
 @app.post("/api/conversations", response_model=Conversation)
-def create_conversation(title: str = "New Chat"):
+def create_conversation(request: Request, title: str = "New Chat"):
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        return _pg_model({**repo.create(organization_id, user_id, title=title), "messages": []})
     return get_store().create(title=title)
 
 
@@ -274,7 +625,13 @@ def search_conversations(q: str = ""):
 
 
 @app.get("/api/conversations/{conv_id}", response_model=Conversation)
-def get_conversation(conv_id: str):
+def get_conversation(conv_id: str, request: Request):
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        data = repo.get_with_messages(conv_id, organization_id, user_id)
+        if not data: raise HTTPException(status_code=404, detail="Conversation not found")
+        return _pg_model(data)
     conv = get_store().get(conv_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
@@ -282,24 +639,43 @@ def get_conversation(conv_id: str):
 
 
 @app.put("/api/conversations/{conv_id}/rename")
-def rename_conversation(conv_id: str, body: dict):
+def rename_conversation(conv_id: str, body: dict, request: Request):
     title = body.get("title", "")
     if not title:
         raise HTTPException(status_code=400, detail="title is required")
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        try: repo.rename(conv_id, organization_id, user_id, title)
+        except ConversationOwnershipError: raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"success": True}
     if not get_store().rename(conv_id, title):
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {"success": True}
 
 
 @app.delete("/api/conversations/{conv_id}")
-def delete_conversation(conv_id: str):
+def delete_conversation(conv_id: str, request: Request):
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        try: repo.delete(conv_id, organization_id, user_id)
+        except ConversationOwnershipError: raise HTTPException(status_code=404, detail="Conversation not found")
+        return {"success": True}
     if not get_store().delete(conv_id):
         raise HTTPException(status_code=404, detail="Conversation not found")
     return {"success": True}
 
 
 @app.post("/api/conversations/{conv_id}/provider")
-def set_conversation_provider(conv_id: str, body: ProviderSwitchRequest):
+def set_conversation_provider(conv_id: str, body: ProviderSwitchRequest, request: Request):
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        try: repo.update_provider(conv_id, organization_id, user_id, body.provider)
+        except ConversationOwnershipError: raise HTTPException(status_code=404, detail="Conversation not found")
+        switch_provider(body)
+        return {"success": True, "provider": body.provider}
     if not get_store().update_provider(conv_id, body.provider):
         raise HTTPException(status_code=404, detail="Conversation not found")
     switch_provider(body)
@@ -309,10 +685,16 @@ def set_conversation_provider(conv_id: str, body: ProviderSwitchRequest):
 # ── Chat (non-streaming) ──────────────────────────────────────
 
 @app.post("/api/conversations/{conv_id}/chat")
-async def chat(conv_id: str, req: ChatRequest):
+async def chat(conv_id: str, req: ChatRequest, request: Request):
     """Send a message and get a response (non-streaming)."""
     store = get_store()
-    conv = store.get(conv_id)
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        data = repo.get_with_messages(conv_id, organization_id, user_id)
+        conv = _pg_model(data) if data else None
+    else:
+        conv = store.get(conv_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -321,7 +703,10 @@ async def chat(conv_id: str, req: ChatRequest):
         content=req.message,
         provider=req.provider,
     )
-    store.add_message(conv_id, user_msg)
+    if repo:
+        repo.add_message(conv_id, organization_id, user_id, user_msg.id, user_msg.role.value, user_msg.content, user_msg.provider)
+    else:
+        store.add_message(conv_id, user_msg)
 
     history = _build_history(conv)
 
@@ -347,7 +732,10 @@ async def chat(conv_id: str, req: ChatRequest):
         tool_calls=tool_calls_made,
         provider=req.provider or conv.provider,
     )
-    store.add_message(conv_id, assistant_msg)
+    if repo:
+        repo.add_message(conv_id, organization_id, user_id, assistant_msg.id, assistant_msg.role.value, assistant_msg.content, assistant_msg.provider)
+    else:
+        store.add_message(conv_id, assistant_msg)
 
     return ChatResponse(message=assistant_msg)
 
@@ -355,10 +743,16 @@ async def chat(conv_id: str, req: ChatRequest):
 # ── Chat (SSE streaming) ──────────────────────────────────────
 
 @app.post("/api/conversations/{conv_id}/chat/stream")
-async def chat_stream(conv_id: str, req: ChatRequest):
+async def chat_stream(conv_id: str, req: ChatRequest, request: Request):
     """SSE streaming chat endpoint."""
     store = get_store()
-    conv = store.get(conv_id)
+    repo = _pg_repository(request)
+    if repo:
+        user_id, organization_id = _pg_owner(request)
+        data = repo.get_with_messages(conv_id, organization_id, user_id)
+        conv = _pg_model(data) if data else None
+    else:
+        conv = store.get(conv_id)
     if not conv:
         raise HTTPException(status_code=404, detail="Conversation not found")
 
@@ -368,7 +762,10 @@ async def chat_stream(conv_id: str, req: ChatRequest):
         content=req.message,
         provider=req.provider,
     )
-    store.add_message(conv_id, user_msg)
+    if repo:
+        repo.add_message(conv_id, organization_id, user_id, user_msg.id, user_msg.role.value, user_msg.content, user_msg.provider)
+    else:
+        store.add_message(conv_id, user_msg)
 
     # Build history for LLM (includes system prompt + prior messages)
     history = _build_history(conv)
@@ -415,7 +812,10 @@ async def chat_stream(conv_id: str, req: ChatRequest):
             tool_calls=tool_calls_made,
             provider=req.provider or conv.provider,
         )
-        store.add_message(conv_id, assistant_msg)
+        if repo:
+            repo.add_message(conv_id, organization_id, user_id, assistant_msg.id, assistant_msg.role.value, assistant_msg.content, assistant_msg.provider)
+        else:
+            store.add_message(conv_id, assistant_msg)
 
         yield f"data: {json.dumps({'type': 'done', 'message_id': assistant_msg.id})}\n\n"
 

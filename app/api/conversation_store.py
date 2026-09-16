@@ -6,7 +6,7 @@ the existing session architecture from Phase 1.
 """
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Optional, List, Dict
 
 from app.api.models import Conversation, ConversationSummary, ChatMessage
@@ -16,6 +16,13 @@ SESSIONS_DIR = os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(__fi
 
 def _ensure_dir():
     os.makedirs(SESSIONS_DIR, exist_ok=True)
+
+
+def _sort_timestamp(value: datetime) -> datetime:
+    """Return a comparable UTC timestamp for old and new saved records."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
 
 
 class ConversationStore:
@@ -60,7 +67,7 @@ class ConversationStore:
     def list_all(self) -> List[ConversationSummary]:
         convs = sorted(
             self._conversations.values(),
-            key=lambda c: c.updated_at,
+            key=lambda c: _sort_timestamp(c.updated_at),
             reverse=True,
         )
         return [
@@ -79,7 +86,7 @@ class ConversationStore:
         if not conv:
             return None
         conv.messages.append(message)
-        conv.updated_at = datetime.utcnow()
+        conv.updated_at = datetime.now(timezone.utc)
         # Auto-title from first user message
         if conv.title == "New Chat" and message.role.value == "user":
             conv.title = message.content[:60]
@@ -98,7 +105,7 @@ class ConversationStore:
         if not conv:
             return False
         conv.provider = provider
-        conv.updated_at = datetime.utcnow()
+        conv.updated_at = datetime.now(timezone.utc)
         self._save(conv)
         return True
 
@@ -107,7 +114,7 @@ class ConversationStore:
         if not conv:
             return False
         conv.title = title
-        conv.updated_at = datetime.utcnow()
+        conv.updated_at = datetime.now(timezone.utc)
         self._save(conv)
         return True
 
@@ -127,7 +134,7 @@ class ConversationStore:
             if query_lower in c.title.lower()
             or any(query_lower in m.content.lower() for m in c.messages if m.role.value == "user")
         ]
-        results.sort(key=lambda c: c.updated_at, reverse=True)
+        results.sort(key=lambda c: _sort_timestamp(c.updated_at), reverse=True)
         return [
             ConversationSummary(
                 id=c.id,
