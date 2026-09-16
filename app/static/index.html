@@ -11,14 +11,14 @@
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.svg">
-  <link rel="stylesheet" href="/static/app.css?v=23">
+  <link rel="stylesheet" href="/static/app.css?v=27">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
     <form id="login-form" class="login-card">
       <div class="login-mark">⌁</div><p class="login-eyebrow">SECURE OPS CONSOLE</p><h1>JARVIS // OPS</h1><p class="login-subtitle">Sign in to your infrastructure workspace.</p><label>Username<input id="login-username" autocomplete="username" required></label><label>Password<input id="login-password" type="password" autocomplete="current-password" required></label><button type="submit">LOGIN</button><button type="button" class="secondary-login" id="register-toggle">Create account</button><p id="login-error" role="alert"></p>
     </form>
-    <form id="register-form" class="login-card" hidden>
+    <form id="register-form" class="login-card register-form" hidden>
       <button type="button" class="auth-back" id="register-back">← Back to login</button><div class="login-mark">✦</div><p class="login-eyebrow">NEW WORKSPACE IDENTITY</p><h1>Create account</h1><p class="login-subtitle">Set up your operator profile to continue.</p><div class="form-row"><label>First name<input id="register-first-name" autocomplete="given-name" required></label><label>Last name<input id="register-last-name" autocomplete="family-name" required></label></div><label>Email<input id="register-email" type="email" autocomplete="email" required></label><label>Username<input id="register-username" autocomplete="username" minlength="3" required></label><label>Password<input id="register-password" type="password" autocomplete="new-password" minlength="8" required></label><label>Confirm password<input id="register-confirm-password" type="password" autocomplete="new-password" minlength="8" required></label><button type="submit">CREATE ACCOUNT</button><p id="register-error" role="alert"></p>
     </form>
   </section>
@@ -28,7 +28,6 @@
       <div class="menu-wrap"><button class="icon-button" id="menu-button" aria-label="Open menu" aria-expanded="false">☰</button>
         <div id="menu" class="menu" hidden>
           <button id="clear-chat" type="button">Clear chat</button>
-          <label class="menu-provider">Provider<select id="provider"></select></label>
           <button id="menu-status" type="button">Infrastructure status</button>
           <button id="menu-settings" type="button">Settings</button>
           <button id="menu-terminal" type="button">Open terminal</button>
@@ -42,6 +41,7 @@
         <form id="chat-form" class="composer">
           <button type="button" class="plus-button" id="new-chat" aria-label="Start a new chat">＋</button>
           <textarea id="message" rows="1" placeholder="Message JARVIS..." autocomplete="off"></textarea>
+          <label class="composer-provider"><span class="sr-only">Provider</span><select id="provider" aria-label="Choose AI provider"></select></label>
           <button class="send-button" aria-label="Send message">➤</button>
         </form>
       </section>
