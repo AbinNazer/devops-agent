@@ -26,6 +26,8 @@ body{font-family:Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,
 /* Settings uses one predictable scroll surface on desktop and mobile. */
 .workspace{min-height:0}
 .settings-panel{height:100%;min-height:0;overflow-x:hidden;overflow-y:auto;-webkit-overflow-scrolling:touch;overscroll-behavior-y:contain}
+.settings-panel [data-settings-section-content][hidden]{display:none!important}
+.settings-panel{flex:1 1 auto}
 .settings-layout{align-items:start}
 .settings-content{min-width:0;width:100%}
 .settings-section,.settings-grid{min-width:0}
