@@ -1,5 +1,5 @@
-const CACHE = 'jarvis-shell-v28';
-const SHELL = ['/','/static/app.css?v=29','/static/app.js?v=21','/static/manifest.webmanifest','/static/icon-192.svg','/static/icon-512.svg'];
+const CACHE = 'jarvis-shell-v29';
+const SHELL = ['/','/static/app.css?v=30','/static/app.js?v=21','/static/manifest.webmanifest','/static/icon-192.svg','/static/icon-512.svg'];
 self.addEventListener('install', event => event.waitUntil(caches.open(CACHE).then(cache => cache.addAll(SHELL)).then(() => self.skipWaiting())));
 self.addEventListener('activate', event => event.waitUntil(self.clients.claim()));
 self.addEventListener('fetch', event => {
