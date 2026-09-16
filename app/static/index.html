@@ -11,7 +11,7 @@
   <meta name="apple-mobile-web-app-title" content="JARVIS">
   <link rel="manifest" href="/static/manifest.webmanifest">
   <link rel="apple-touch-icon" href="/static/icon-192.svg">
-  <link rel="stylesheet" href="/static/app.css?v=27">
+  <link rel="stylesheet" href="/static/app.css?v=28">
 </head>
 <body>
   <section id="login-screen" class="login-screen">
@@ -28,6 +28,7 @@
       <div class="menu-wrap"><button class="icon-button" id="menu-button" aria-label="Open menu" aria-expanded="false">☰</button>
         <div id="menu" class="menu" hidden>
           <button id="clear-chat" type="button">Clear chat</button>
+          <label class="menu-provider">Provider<select id="provider"></select></label>
           <button id="menu-status" type="button">Infrastructure status</button>
           <button id="menu-settings" type="button">Settings</button>
           <button id="menu-terminal" type="button">Open terminal</button>
@@ -41,7 +42,6 @@
         <form id="chat-form" class="composer">
           <button type="button" class="plus-button" id="new-chat" aria-label="Start a new chat">＋</button>
           <textarea id="message" rows="1" placeholder="Message JARVIS..." autocomplete="off"></textarea>
-          <label class="composer-provider"><span class="sr-only">Provider</span><select id="provider" aria-label="Choose AI provider"></select></label>
           <button class="send-button" aria-label="Send message">➤</button>
         </form>
       </section>
