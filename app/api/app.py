@@ -773,39 +773,67 @@ async def chat_stream(conv_id: str, req: ChatRequest, request: Request):
     async def generate():
         full_text = ""
         tool_calls_made = []
-        tool_results_seen = []
+
+        # Sentinel sent by agent thread when it finishes (or errors out)
+        _DONE = object()
+
+        loop = asyncio.get_running_loop()
+        q: asyncio.Queue = asyncio.Queue()
+
+        def _put(event: dict):
+            """Thread-safe push from agent thread into the async queue."""
+            loop.call_soon_threadsafe(q.put_nowait, event)
 
         try:
             agent = _build_agent(req.provider)
 
-            # Collect tool calls/results during execution
-            collected_tool_calls = []
-            collected_tool_results = []
-
+            # --- Callbacks invoked on the agent thread ---
             def on_tool_call(name, args):
-                collected_tool_calls.append({"name": name, "arguments": args})
+                _put({"type": "tool_call", "name": name, "arguments": args})
 
-            # Run agent in executor (blocking LLM + tool calls)
-            result_text = await asyncio.get_event_loop().run_in_executor(
-                None, lambda: agent.run(req.message, history, on_tool_call=on_tool_call)
-            )
-            full_text = result_text
+            def on_tool_result(name, result):
+                _put({"type": "tool_result", "name": name,
+                      "success": result.get("success", True)})
 
-            # Send all tool calls that were made
-            for tc in collected_tool_calls:
-                tc_info = ToolCallInfo(name=tc["name"], arguments=tc["arguments"])
-                tool_calls_made.append(tc_info)
-                yield f"data: {json.dumps({'type': 'tool_call', 'name': tc['name'], 'arguments': tc['arguments']})}\n\n"
+            # Immediately acknowledge receipt so the browser stops the spinner
+            _put({"type": "status", "content": "Thinking\u2026"})
 
-            # Send the text response
-            if full_text:
-                yield f"data: {json.dumps({'type': 'text', 'content': full_text})}\n\n"
+            def run_agent():
+                try:
+                    text = agent.run(
+                        req.message, history,
+                        on_tool_call=on_tool_call,
+                        on_tool_result=on_tool_result,
+                    )
+                    _put({"type": "text", "content": text})
+                except Exception as exc:
+                    _put({"type": "error", "content": str(exc)[:200]})
+                finally:
+                    _put({"__sentinel__": True})
+
+            # Run agent in default thread pool — does NOT block the event loop
+            loop.run_in_executor(None, run_agent)
+
+            # --- Drain queue and stream to client ---
+            while True:
+                event = await q.get()
+                if event.get("__sentinel__"):
+                    break
+
+                et = event.get("type")
+                if et == "tool_call":
+                    tc_info = ToolCallInfo(name=event["name"], arguments=event.get("arguments", {}))
+                    tool_calls_made.append(tc_info)
+                elif et == "text":
+                    full_text = event.get("content", "")
+
+                yield f"data: {json.dumps(event)}\n\n"
 
         except Exception as e:
             logger.error("stream_agent_error=%s", e)
             yield f"data: {json.dumps({'type': 'error', 'content': str(e)[:200]})}\n\n"
 
-        # Store assistant response
+        # Persist assistant message
         assistant_msg = ChatMessage(
             role=MessageRole.ASSISTANT,
             content=full_text,

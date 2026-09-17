@@ -15,6 +15,7 @@ import logging
 import os
 import subprocess
 import socket
+import threading
 import time
 from typing import Optional
 
@@ -60,10 +61,13 @@ class SSHExecutor(Executor):
     """
     Execute commands on a remote VPS via SSH.
     Reuses a single connection across calls (like the old SSHConnectionManager).
+    Thread-safe: _lock guards the shared paramiko client so concurrent
+    read-only health checks cannot race.
     """
 
     def __init__(self):
         self._client: Optional[paramiko.SSHClient] = None
+        self._lock = threading.RLock()  # Re-entrant so retry works within same thread
 
     def _is_alive(self) -> bool:
         if self._client is None:
@@ -95,61 +99,62 @@ class SSHExecutor(Executor):
 
     def execute(self, command: str) -> dict:
         start = time.time()
-        for attempt in (1, 2):
-            try:
-                client = self._get_client()
-                stdin, stdout, stderr = client.exec_command(command, timeout=COMMAND_TIMEOUT)
-                exit_code = stdout.channel.recv_exit_status()
-                out = stdout.read().decode(errors="replace")
-                err = stderr.read().decode(errors="replace")
-                duration = round(time.time() - start, 2)
-                result = {
-                    "success": True,
-                    "command": command,
-                    "stdout": truncate(out),
-                    "stderr": truncate(err),
-                    "exit_code": exit_code,
-                }
-                logger.info("ssh_executed command=%r exit_code=%s duration=%ss attempt=%d",
-                            command, exit_code, duration, attempt)
-                audit_logger.info("EXECUTED command=%r exit_code=%s duration=%ss attempt=%d",
-                                   command, exit_code, duration, attempt)
-                return result
+        with self._lock:
+            for attempt in (1, 2):
+                try:
+                    client = self._get_client()
+                    stdin, stdout, stderr = client.exec_command(command, timeout=COMMAND_TIMEOUT)
+                    exit_code = stdout.channel.recv_exit_status()
+                    out = stdout.read().decode(errors="replace")
+                    err = stderr.read().decode(errors="replace")
+                    duration = round(time.time() - start, 2)
+                    result = {
+                        "success": True,
+                        "command": command,
+                        "stdout": truncate(out),
+                        "stderr": truncate(err),
+                        "exit_code": exit_code,
+                    }
+                    logger.info("ssh_executed command=%r exit_code=%s duration=%ss attempt=%d",
+                                command, exit_code, duration, attempt)
+                    audit_logger.info("EXECUTED command=%r exit_code=%s duration=%ss attempt=%d",
+                                       command, exit_code, duration, attempt)
+                    return result
 
-            except paramiko.AuthenticationException:
-                audit_logger.error("AUTH_FAILED command=%r", command)
-                return {"success": False, "error": "SSH authentication failed — check your SSH key and username."}
+                except paramiko.AuthenticationException:
+                    audit_logger.error("AUTH_FAILED command=%r", command)
+                    return {"success": False, "error": "SSH authentication failed — check your SSH key and username."}
 
-            except socket.gaierror:
-                audit_logger.error("HOST_UNRESOLVABLE command=%r", command)
-                return {"success": False, "error": f"Couldn't resolve host '{Config.VPS_HOST}'."}
+                except socket.gaierror:
+                    audit_logger.error("HOST_UNRESOLVABLE command=%r", command)
+                    return {"success": False, "error": f"Couldn't resolve host '{Config.VPS_HOST}'."}
 
-            except FileNotFoundError:
-                audit_logger.error("KEY_NOT_FOUND command=%r", command)
-                return {"success": False, "error": "SSH key file not found. Check VPS_SSH_KEY_PATH in your .env."}
+                except FileNotFoundError:
+                    audit_logger.error("KEY_NOT_FOUND command=%r", command)
+                    return {"success": False, "error": "SSH key file not found. Check VPS_SSH_KEY_PATH in your .env."}
 
-            except paramiko.BadHostKeyException:
-                audit_logger.error("HOST_KEY_MISMATCH command=%r", command)
-                self.close()
-                return {"success": False, "error": "Host key verification failed — the VPS key doesn't match known_hosts."}
+                except paramiko.BadHostKeyException:
+                    audit_logger.error("HOST_KEY_MISMATCH command=%r", command)
+                    self.close()
+                    return {"success": False, "error": "Host key verification failed — the VPS key doesn't match known_hosts."}
 
-            except _TRANSIENT_EXCEPTIONS as e:
-                self.close()
-                if attempt == 1:
-                    logger.warning("ssh_transient_error type=%s retrying", type(e).__name__)
-                    time.sleep(RETRY_DELAY_SECONDS)
-                    continue
-                audit_logger.error("FAILED command=%r type=%s (after retry)", command, type(e).__name__)
-                if isinstance(e, socket.timeout):
-                    return {"success": False, "error": "Connection to the VPS timed out (after retry)."}
-                if isinstance(e, ConnectionRefusedError):
-                    return {"success": False, "error": "Connection refused (after retry)."}
-                return {"success": False, "error": "Couldn't reach the VPS over SSH (after retry)."}
+                except _TRANSIENT_EXCEPTIONS as e:
+                    self.close()
+                    if attempt == 1:
+                        logger.warning("ssh_transient_error type=%s retrying", type(e).__name__)
+                        time.sleep(RETRY_DELAY_SECONDS)
+                        continue
+                    audit_logger.error("FAILED command=%r type=%s (after retry)", command, type(e).__name__)
+                    if isinstance(e, socket.timeout):
+                        return {"success": False, "error": "Connection to the VPS timed out (after retry)."}
+                    if isinstance(e, ConnectionRefusedError):
+                        return {"success": False, "error": "Connection refused (after retry)."}
+                    return {"success": False, "error": "Couldn't reach the VPS over SSH (after retry)."}
 
-            except Exception as e:
-                audit_logger.error("UNEXPECTED_ERROR command=%r type=%s", command, type(e).__name__)
-                self.close()
-                return {"success": False, "error": "Unexpected error while connecting to the VPS."}
+                except Exception as e:
+                    audit_logger.error("UNEXPECTED_ERROR command=%r type=%s", command, type(e).__name__)
+                    self.close()
+                    return {"success": False, "error": "Unexpected error while connecting to the VPS."}
 
         return {"success": False, "error": "Unexpected error: exhausted retries."}
 

@@ -42,35 +42,69 @@ def check_infrastructure_health() -> dict:
     Run a full local + VPS + AWS health sweep in one call. Use this for
     broad requests like "check everything" or "is anything wrong" instead
     of calling individual tools one at a time.
+
+    Local, VPS, and AWS sweeps execute concurrently via ThreadPoolExecutor
+    so the total wall-clock time is bounded by the slowest single lane
+    (~1-3 s) rather than the sum of all lanes (previously 4-8+ s).
     """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    def _local_sweep():
+        return {
+            "cpu":    _safe(local_tools.get_local_cpu_usage),
+            "mem":    _safe(local_tools.get_local_memory_usage),
+            "disk":   _safe(local_tools.get_local_disk_usage),
+            "net":    _safe(local_tools.check_local_network),
+            "docker": _safe(local_tools.get_local_docker_status),
+        }
+
+    def _vps_sweep():
+        return {
+            "cpu":    _safe(vps_server.get_cpu_usage),
+            "mem":    _safe(vps_server.get_memory_usage),
+            "disk":   _safe(vps_server.get_disk_usage),
+            "uptime": _safe(vps_server.get_uptime),
+            "net":    _safe(vps_network.check_network_connectivity),
+            "docker": _safe(vps_docker.docker_health_status),
+        }
+
+    def _aws_sweep():
+        return {
+            "ec2": _safe(aws_tools.list_ec2_instances),
+        }
+
     report = {"local": {}, "vps": {}, "aws": {}}
 
-    # --- Local ---
-    cpu = _safe(local_tools.get_local_cpu_usage)
-    mem = _safe(local_tools.get_local_memory_usage)
-    disk = _safe(local_tools.get_local_disk_usage)
-    net = _safe(local_tools.check_local_network)
-    docker_local = _safe(local_tools.get_local_docker_status)
+    with ThreadPoolExecutor(max_workers=3) as pool:
+        future_local = pool.submit(_local_sweep)
+        future_vps   = pool.submit(_vps_sweep)
+        future_aws   = pool.submit(_aws_sweep)
 
+        local_data = future_local.result()
+        vps_data   = future_vps.result()
+        aws_data   = future_aws.result()
+
+    # --- Local ---
+    cpu, mem, disk, net, docker_local = (
+        local_data["cpu"], local_data["mem"], local_data["disk"],
+        local_data["net"], local_data["docker"],
+    )
     report["local"]["cpu"] = _entry(cpu, lambda r: _status_for_percent(
         r.get("load_average_1min", 0) / max(r.get("cpu_count", 1), 1) * 100, 70, 90))
     report["local"]["memory"] = _entry(mem, lambda r: _status_for_percent(r.get("memory_percent"), 80, 90))
-    report["local"]["disk"] = _entry(disk, lambda r: _status_for_percent(r.get("disk_percent"), 75, 90))
+    report["local"]["disk"]   = _entry(disk, lambda r: _status_for_percent(r.get("disk_percent"), 75, 90))
     report["local"]["network"] = _entry(net, lambda r: "HEALTHY" if r.get("reachable") else "CRITICAL")
-    report["local"]["docker"] = _entry(docker_local, lambda r: "HEALTHY" if r.get("available") else "UNKNOWN")
+    report["local"]["docker"]  = _entry(docker_local, lambda r: "HEALTHY" if r.get("available") else "UNKNOWN")
 
     # --- VPS ---
-    vps_cpu = _safe(vps_server.get_cpu_usage)
-    vps_mem = _safe(vps_server.get_memory_usage)
-    vps_disk = _safe(vps_server.get_disk_usage)
-    vps_uptime = _safe(vps_server.get_uptime)
-    vps_net = _safe(vps_network.check_network_connectivity)
-    vps_docker_health = _safe(vps_docker.docker_health_status)
-
-    report["vps"]["cpu"] = _entry(vps_cpu, lambda r: _status_for_percent(r.get("approx_cpu_percent"), 70, 90))
-    report["vps"]["memory"] = _entry(vps_mem, lambda r: _status_for_percent(r.get("memory_percent"), 80, 90))
-    report["vps"]["disk"] = _entry(vps_disk, lambda r: _status_for_percent(r.get("disk_percent"), 75, 90))
-    report["vps"]["uptime"] = _entry(vps_uptime, lambda r: "HEALTHY")
+    vps_cpu, vps_mem, vps_disk, vps_uptime, vps_net, vps_docker_health = (
+        vps_data["cpu"], vps_data["mem"], vps_data["disk"],
+        vps_data["uptime"], vps_data["net"], vps_data["docker"],
+    )
+    report["vps"]["cpu"]     = _entry(vps_cpu, lambda r: _status_for_percent(r.get("approx_cpu_percent"), 70, 90))
+    report["vps"]["memory"]  = _entry(vps_mem, lambda r: _status_for_percent(r.get("memory_percent"), 80, 90))
+    report["vps"]["disk"]    = _entry(vps_disk, lambda r: _status_for_percent(r.get("disk_percent"), 75, 90))
+    report["vps"]["uptime"]  = _entry(vps_uptime, lambda r: "HEALTHY")
     report["vps"]["network"] = _entry(vps_net, lambda r: "HEALTHY" if r.get("reachable") else "CRITICAL")
 
     if vps_docker_health.get("success"):
@@ -81,7 +115,7 @@ def check_infrastructure_health() -> dict:
         report["vps"]["docker"] = {"status": "UNKNOWN", "data": vps_docker_health}
 
     # --- AWS ---
-    ec2 = _safe(aws_tools.list_ec2_instances)
+    ec2 = aws_data["ec2"]
     if ec2.get("success"):
         stopped = [i for i in ec2["instances"] if i["state"] not in ("running",)]
         status = "WARNING" if stopped else "HEALTHY"

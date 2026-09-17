@@ -73,14 +73,70 @@
   provider.onchange = () => fetch('/api/providers/switch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider:provider.value})});
   async function sendMessage(text) {
     addMessage('user', text); if (/^\s*(give me|open) terminal\s*$/i.test(text)) openTerminal();
-    const target = addMessage('assistant', ''); target.innerHTML = '<span class="typing"><i></i><i></i><i></i></span>';
-    const response = await fetch(`/api/conversations/${conversationId}/chat/stream`, {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({message:text, provider:provider.value})});
-    if (!response.ok) { target.textContent = `Request failed (${response.status})`; return; }
-    target.textContent = ''; const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
-    while (true) { const {value, done} = await reader.read(); if (done) break; buffer += decoder.decode(value, {stream:true}); const chunks = buffer.split('\n\n'); buffer = chunks.pop(); chunks.forEach(chunk => { const line = chunk.split('\n').find(x => x.startsWith('data: ')); if (!line) return; const event = JSON.parse(line.slice(6)); if (event.type === 'text') target.innerHTML = renderMarkdown(event.content); if (event.type === 'error') target.textContent = event.content; messages.scrollTop = messages.scrollHeight; }); }
+    const target = addMessage('assistant', '');
+    target.innerHTML = '<div class="assistant-status"><span class="typing"><i></i><i></i><i></i></span> <span class="status-text">Thinking…</span></div>';
+    try {
+      const response = await fetch(`/api/conversations/${conversationId}/chat/stream`, {
+        method: 'POST',
+        headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({message: text, provider: provider.value})
+      });
+      if (!response.ok) { target.textContent = `Request failed (${response.status})`; return; }
+      const reader = response.body.getReader(), decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const {value, done} = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, {stream: true});
+        const chunks = buffer.split('\n\n');
+        buffer = chunks.pop();
+        for (const chunk of chunks) {
+          const line = chunk.split('\n').find(x => x.startsWith('data: '));
+          if (!line) continue;
+          try {
+            const event = JSON.parse(line.slice(6));
+            const statusEl = target.querySelector('.status-text');
+            if (event.type === 'status' && statusEl) {
+              statusEl.textContent = event.content || 'Thinking…';
+            } else if (event.type === 'tool_call' && statusEl) {
+              const friendlyName = (event.name || '').replace(/_/g, ' ');
+              statusEl.textContent = `Checking ${friendlyName}…`;
+            } else if (event.type === 'tool_result' && statusEl) {
+              const friendlyName = (event.name || '').replace(/_/g, ' ');
+              statusEl.textContent = `Completed ${friendlyName}…`;
+            } else if (event.type === 'text') {
+              target.innerHTML = renderMarkdown(event.content);
+            } else if (event.type === 'error') {
+              target.textContent = event.content;
+            }
+          } catch (pe) {}
+          keepChatAtBottom();
+        }
+      }
+    } catch (err) {
+      target.textContent = `Connection error: ${err.message}`;
+    }
   }
   function openTerminal() { window.location.assign('/terminal'); }
-  $('chat-form').onsubmit = e => { e.preventDefault(); const input = $('message'); const text = input.value.trim(); if (!text) return; input.value = ''; sendMessage(text).catch(err => addMessage('assistant', `Error: ${err.message}`)); };
+  const messageInput = $('message');
+  function autoResizeInput() {
+    messageInput.style.height = 'auto';
+    messageInput.style.height = Math.min(messageInput.scrollHeight, 120) + 'px';
+  }
+  messageInput.addEventListener('keydown', e => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      if (messageInput.value.trim()) $('chat-form').requestSubmit();
+    }
+  });
+  $('chat-form').onsubmit = e => {
+    e.preventDefault();
+    const text = messageInput.value.trim();
+    if (!text) return;
+    messageInput.value = '';
+    messageInput.style.height = 'auto';
+    sendMessage(text).catch(err => addMessage('assistant', `Error: ${err.message}`));
+  };
   $('new-chat').onclick = () => clearChat().catch(err => addMessage('assistant', `Unable to start a new chat: ${err.message}`));
   $('menu-button').onclick = () => { const menu = $('menu'); menu.hidden = !menu.hidden; $('menu-button').setAttribute('aria-expanded', String(!menu.hidden)); };
   $('clear-chat').onclick = () => clearChat().catch(err => addMessage('assistant', `Unable to clear chat: ${err.message}`));
@@ -112,16 +168,31 @@
     [40, 180, 420].forEach(delay => setTimeout(keepChatAtBottom, delay));
   }
   $('message').addEventListener('focus', e => keepInputVisible(e.target));
-  $('message').addEventListener('input', () => { messages.scrollTop = messages.scrollHeight; });
+  $('message').addEventListener('input', () => { autoResizeInput(); keepChatAtBottom(); });
   messages.addEventListener('click', e => {
     const prompt = e.target.closest('[data-prompt]');
-    if (prompt) { $('message').value = prompt.dataset.prompt; $('message').focus(); keepChatAtBottom(); return; }
+    if (prompt) { $('message').value = prompt.dataset.prompt; autoResizeInput(); $('message').focus(); keepChatAtBottom(); return; }
     const copy = e.target.closest('[data-copy]');
     if (copy) { const body = copy.closest('.message').querySelector('.message-body'); const text = body.innerText; const done = () => { copy.textContent = '✓'; setTimeout(() => copy.textContent = '⧉', 1200); }; if (navigator.clipboard) navigator.clipboard.writeText(text).then(done).catch(() => fallbackCopy(text, done)); else fallbackCopy(text, done); }
   });
   function fallbackCopy(text, done) { const area = document.createElement('textarea'); area.value = text; document.body.append(area); area.select(); try { document.execCommand('copy'); done(); } finally { area.remove(); } }
-  function syncViewportHeight() { const height = window.visualViewport ? window.visualViewport.height : window.innerHeight; document.documentElement.style.setProperty('--viewport-height', `${height}px`); }
-  syncViewportHeight(); window.addEventListener('resize', syncViewportHeight); if (window.visualViewport) window.visualViewport.addEventListener('resize', () => { syncViewportHeight(); if (document.activeElement === $('message')) keepChatAtBottom(); });
+  function syncViewportHeight() {
+    const vv = window.visualViewport;
+    const height = vv ? vv.height : window.innerHeight;
+    document.documentElement.style.setProperty('--viewport-height', `${height}px`);
+  }
+  syncViewportHeight();
+  window.addEventListener('resize', syncViewportHeight);
+  window.addEventListener('orientationchange', () => setTimeout(syncViewportHeight, 150));
+  if (window.visualViewport) {
+    window.visualViewport.addEventListener('resize', () => {
+      syncViewportHeight();
+      if (document.activeElement === $('message')) keepChatAtBottom();
+    });
+    window.visualViewport.addEventListener('scroll', () => {
+      if (window.scrollY > 0) window.scrollTo(0, 0);
+    });
+  }
   fetch('/api/auth/me').then(r => r.json()).then(data => { if (data.authenticated) { showApp(); return init(); } $('login-screen').hidden = false; appShell.hidden = true; }).catch(() => { $('login-screen').hidden = false; appShell.hidden = true; });
   if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/static/sw.js').catch(() => {}));
 })();

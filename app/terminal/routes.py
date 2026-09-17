@@ -55,17 +55,21 @@ async def terminal_ws(websocket: WebSocket, session_id: str):
     await websocket.accept()
     logger.info("terminal_ws_connected session=%s", session_id)
 
+
     async def read_ssh_output():
-        while session.is_alive() and websocket.client_state == WebSocketState.CONNECTED:
+        while websocket.client_state == WebSocketState.CONNECTED:
             try:
-                output = await asyncio.wait_for(session.read_output(), timeout=0.1)
-                if output:
-                    await websocket.send_text(json.dumps({"type": "output", "data": output}))
-            except asyncio.TimeoutError:
-                pass
+                # read_output() blocks on asyncio.Queue — no sleep needed
+                output = await session.read_output()
+                if output is None:
+                    # EOF / session closed
+                    break
+                await websocket.send_text(json.dumps({"type": "output", "data": output}))
+            except asyncio.CancelledError:
+                break
             except Exception:
                 break
-            await asyncio.sleep(0.01)
+
 
     output_task = asyncio.create_task(read_ssh_output())
 

@@ -110,15 +110,18 @@ class Agent:
         self.memory_command_handler = memory_command_handler
         self.allowed_tool_names = allowed_tool_names
 
-    def run(self, user_input: str, history: list, on_tool_call=None) -> str:
+    def run(self, user_input: str, history: list, on_tool_call=None,
+            on_tool_result=None) -> str:
         """
         Run one full turn: append the user's message, loop through however
         many tool calls the LLM needs, and return the final text answer.
         `history` is mutated in place so the caller keeps the conversation.
 
-        on_tool_call: optional callback(name, arguments) invoked right
-        before each tool executes, so a caller (like the CLI) can display
-        progress without the Agent needing to know about print/rich/etc.
+        on_tool_call:   optional callback(name, arguments) invoked right
+                        before each tool executes.
+        on_tool_result: optional callback(name, result) invoked right
+                        after each tool finishes — used by the SSE bridge
+                        to stream live feedback.
         """
         if self.memory_command_handler:
             direct_answer = self.memory_command_handler(user_input)
@@ -176,6 +179,8 @@ class Agent:
                     logger.warning("tool_failed=%s error=%s", tc["name"], tool_result.get("error"))
                 else:
                     logger.info("tool_succeeded=%s", tc["name"])
+                if on_tool_result:
+                    on_tool_result(tc["name"], tool_result)
                 history.append(self.provider.tool_result_message(tc, tool_result))
 
         # Safety valve hit — return whatever text we have, or a clear admission

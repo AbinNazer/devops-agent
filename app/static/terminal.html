@@ -37,17 +37,17 @@
     .et { color:#ff5252 !important; }
     @media (max-width:720px) {
       html, body { background:#000; }
-      body { height:100dvh; }
-      .hdr { min-height:42px; padding:6px 10px; background:#000; border-bottom:1px solid #202020; }
-      .hdr-l .bk { font-size:18px; padding:2px 6px; }
-      .hdr-l .tl { font-size:12px; }
-      .hdr-r { gap:4px; }
-      .hdr-r button { min-height:36px; padding:4px 8px; font-size:11px; }
-      #tc { background:#000; padding:0; }
-      #tc .xterm { padding:2px 0 0; font-size:12px; }
-      #tc .xterm-viewport { background:#000; }
-      .tb { min-height:48px; padding:3px 8px max(3px, env(safe-area-inset-bottom)); background:#000; border-top:1px solid #202020; gap:2px; justify-content:space-around; overflow-x:auto; }
-      .tb button { background:#000; border:0; color:#f5f5f5; font-size:15px; font-weight:600; min-width:52px; min-height:42px; padding:5px 8px; }
+      body { height:100dvh; height:var(--viewport-height, 100dvh); }
+      .hdr { min-height:48px; padding:max(8px, env(safe-area-inset-top)) max(12px, env(safe-area-inset-right)) 8px max(12px, env(safe-area-inset-left)); background:#000; border-bottom:1px solid #202020; }
+      .hdr-l .bk { font-size:20px; padding:4px 8px; min-width:36px; min-height:36px; display:inline-flex; align-items:center; }
+      .hdr-l .tl { font-size:13px; }
+      .hdr-r { gap:6px; }
+      .hdr-r button { min-height:38px; padding:6px 12px; font-size:12px; }
+      #tc { background:#000; padding:0; flex:1 1 0; min-height:0; overflow:hidden; }
+      #tc .xterm { padding:2px 0 0; font-size:12px; height:100%; }
+      #tc .xterm-viewport { background:#000; -webkit-overflow-scrolling:touch; overscroll-behavior:contain; }
+      .tb { min-height:50px; padding:4px max(8px, env(safe-area-inset-right)) max(6px, env(safe-area-inset-bottom)) max(8px, env(safe-area-inset-left)); background:#000; border-top:1px solid #202020; gap:3px; justify-content:space-around; overflow-x:auto; -webkit-overflow-scrolling:touch; }
+      .tb button { background:#111; border:1px solid #262626; border-radius:6px; color:#f5f5f5; font-size:13px; font-weight:600; min-width:44px; min-height:42px; padding:5px 8px; }
       .tb .sp { display:none; }
       .ov { background:#000; }
     }
