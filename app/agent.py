@@ -7,6 +7,7 @@ executes anything directly — it only ever returns "call this tool with
 these arguments" as data, which the Agent decides whether/how to act on.
 """
 import logging
+from concurrent.futures import ThreadPoolExecutor
 
 logger = logging.getLogger("agent")
 
@@ -89,6 +90,19 @@ that up to "healthy" or "fine."
 
 MAX_TOOL_ITERATIONS = 8  # safety valve against infinite tool-call loops
 
+# These tools are read-only and safe to run concurrently. Control actions,
+# terminal operations, and anything with approval semantics stay sequential.
+PARALLEL_READ_TOOLS = frozenset({
+    "docker_status", "docker_logs", "docker_inspect", "docker_stats",
+    "docker_health_status", "get_cpu_usage", "get_memory_usage",
+    "get_disk_usage", "get_uptime", "get_service_status",
+    "check_network_connectivity", "get_k3s_nodes", "get_k3s_pods",
+    "get_k3s_deployments", "get_k3s_services", "get_k3s_events",
+    "get_k3s_cluster_status", "get_monitoring_status", "get_active_incidents",
+    "get_monitoring_summary", "explain_anomaly", "analyze_project",
+    "analyze_runtime_sources", "list_project_tree",
+})
+
 
 class Agent:
     def __init__(self, provider, tool_schemas: list, execute_tool_fn,
@@ -145,6 +159,7 @@ class Agent:
             if not tool_calls:
                 return content
 
+            runnable = []
             for tc in tool_calls:
                 tc_sig = (tc["name"], str(tc.get("arguments", {})))
                 if tc_sig in called_tools:
@@ -171,10 +186,22 @@ class Agent:
                     history.append(self.provider.tool_result_message(tc, tool_result))
                     continue
 
+                runnable.append(tc)
+
+            def execute_one(tc):
                 if on_tool_call:
                     on_tool_call(tc["name"], tc["arguments"])
                 logger.info("tool_selected=%s arguments=%s", tc["name"], tc["arguments"])
-                tool_result = self.execute_tool_fn(tc["name"], tc["arguments"])
+                return self.execute_tool_fn(tc["name"], tc["arguments"])
+
+            parallel = len(runnable) > 1 and all(tc["name"] in PARALLEL_READ_TOOLS for tc in runnable)
+            if parallel:
+                with ThreadPoolExecutor(max_workers=min(4, len(runnable))) as pool:
+                    results = list(pool.map(execute_one, runnable))
+            else:
+                results = [execute_one(tc) for tc in runnable]
+
+            for tc, tool_result in zip(runnable, results):
                 if tool_result.get("success") is False:
                     logger.warning("tool_failed=%s error=%s", tc["name"], tool_result.get("error"))
                 else:

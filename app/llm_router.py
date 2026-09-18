@@ -33,6 +33,7 @@ The rest of JARVIS (Agent, tools, security, Phase 5/6) is unchanged.
 import json
 import logging
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import List, Optional, Dict, Any
 
 from app.llm_provider import (
@@ -245,57 +246,79 @@ class LLMRouter(LLMProvider):
         provider (if the error is transient) or fails over to the next one.
         """
         errors = []
-        # Track which providers we've already tried for this request
         tried_indices = set()
 
-        for attempt in range(len(self._states)):
-            # Find the next usable provider
+        def call_provider(provider_idx: int):
+            state = self._states[provider_idx]
+            effective_tools = tools
+            if isinstance(state.provider, OllamaProvider):
+                effective_tools = [
+                    t for t in tools
+                    if t["function"]["name"] in CORE_TOOLS_FOR_SMALL_MODELS
+                ]
+            return state.provider.chat(messages, effective_tools)
+
+        def record_failure(provider_idx: int, error: Exception) -> None:
+            state = self._states[provider_idx]
+            error_msg = str(error)
+            retryable = _classify_error(error_msg) != "non_retryable"
+            state.record_failure(error_msg, retryable=retryable)
+            logger.warning(
+                "llm_provider_failed provider=%s error=%s failing_over=True",
+                state.name, error_msg[:200],
+            )
+            errors.append(f"{state.name}: {error_msg[:100]}")
+
+        # Keep the preferred provider as a single first attempt. This avoids
+        # unnecessary duplicate requests when it is healthy.
+        primary_idx = self._find_next_provider(tried_indices)
+        if primary_idx is not None:
+            tried_indices.add(primary_idx)
+            state = self._states[primary_idx]
+            logger.info("llm_request provider=%s attempt=1/%d", state.name, len(self._states))
+            try:
+                result = call_provider(primary_idx)
+                state.record_success()
+                return result
+            except Exception as error:
+                record_failure(primary_idx, error)
+
+        # Once the primary fails, fallback providers are independent network
+        # calls. Race them so a slow/dead provider cannot delay a healthy one.
+        fallback_indices = []
+        while True:
             provider_idx = self._find_next_provider(tried_indices)
             if provider_idx is None:
-                break  # no more providers to try
-
-            state = self._states[provider_idx]
+                break
             tried_indices.add(provider_idx)
+            fallback_indices.append(provider_idx)
 
-            logger.info(
-                "llm_request provider=%s attempt=%d/%d",
-                state.name, attempt + 1, len(self._states),
-            )
-
+        if fallback_indices:
+            workers = min(len(fallback_indices), 4)
+            pool = ThreadPoolExecutor(max_workers=workers, thread_name_prefix="llm-fallback")
+            futures = {
+                pool.submit(call_provider, idx): idx for idx in fallback_indices
+            }
             try:
-                effective_tools = tools
-                if isinstance(state.provider, OllamaProvider):
-                    effective_tools = [t for t in tools if t["function"]["name"] in CORE_TOOLS_FOR_SMALL_MODELS]
-                result = state.provider.chat(messages, effective_tools)
-                state.record_success()
-                if attempt > 0:
-                    logger.info(
-                        "llm_request_succeeded_after_failover provider=%s attempts=%d",
-                        state.name, attempt + 1,
-                    )
-                return result
-
-            except Exception as e:
-                error_msg = str(e)
-                error_type = _classify_error(error_msg)
-
-                if error_type == "non_retryable":
-                    state.record_failure(error_msg, retryable=False)
-                    logger.warning(
-                        "llm_provider_non_retryable provider=%s error=%s",
-                        state.name, error_msg[:200],
-                    )
-                    errors.append(f"{state.name}: {error_msg[:100]}")
-                    continue  # try next provider
-
-                # Retryable / unknown → failover
-                state.record_failure(error_msg, retryable=True)
-                logger.warning(
-                    "llm_provider_failed provider=%s error=%s failing_over=True",
-                    state.name, error_msg[:200],
-                )
-                errors.append(f"{state.name}: {error_msg[:100]}")
-                continue  # try next provider
+                for future in as_completed(futures):
+                    provider_idx = futures[future]
+                    state = self._states[provider_idx]
+                    logger.info("llm_fallback_race provider=%s", state.name)
+                    try:
+                        result = future.result()
+                        state.record_success()
+                        logger.info("llm_request_succeeded_after_failover provider=%s", state.name)
+                        for pending in futures:
+                            if pending is not future:
+                                pending.cancel()
+                        return result
+                    except Exception as error:
+                        record_failure(provider_idx, error)
+            finally:
+                # Do not wait for a timed-out provider after another fallback
+                # has already failed/succeeded. Its worker is isolated and the
+                # provider state will record the eventual failure if it returns.
+                pool.shutdown(wait=False, cancel_futures=True)
 
         # All providers exhausted
         error_summary = "; ".join(errors) if errors else "No providers available"
