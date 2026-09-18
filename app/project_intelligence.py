@@ -8,6 +8,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import time
 from collections import defaultdict
 from pathlib import Path
 
@@ -79,6 +80,38 @@ def _files(root: Path, limit: int = 5000) -> list[Path]:
             continue
         found.append(path)
     return found
+
+
+def list_project_tree(project_path: str | Path = ".", query: str = "", max_entries: int = 200) -> dict:
+    """Return a fast, bounded directory tree for an authorized project.
+
+    This is intentionally metadata-only: it never reads file contents and
+    skips virtual environments, dependency folders, caches, and secrets.
+    """
+    root = _safe_path(project_path)
+    needle = query.strip().lower()
+    entries = []
+    pending = [root]
+    while pending and len(entries) < max_entries:
+        current = pending.pop(0)
+        try:
+            children = sorted(current.iterdir(), key=lambda item: (item.is_file(), item.name.lower()))
+        except OSError:
+            continue
+        for path in children:
+            relative = path.relative_to(root)
+            if any(part in IGNORED for part in relative.parts) or path.name in SECRET_FILE_NAMES:
+                continue
+            if needle and needle not in str(relative).lower():
+                if path.is_dir():
+                    pending.append(path)
+                continue
+            entries.append({"path": str(relative), "name": path.name, "type": "directory" if path.is_dir() else "file"})
+            if path.is_dir() and len(entries) < max_entries:
+                pending.append(path)
+            if len(entries) >= max_entries:
+                break
+    return {"success": True, "project": str(root), "entries": entries, "truncated": bool(pending), "max_entries": max_entries}
 
 
 def _read(path: Path) -> str:

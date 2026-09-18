@@ -17,6 +17,7 @@ import subprocess
 import socket
 import threading
 import time
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Optional
 
 import paramiko
@@ -53,6 +54,15 @@ class Executor:
 
     def close(self) -> None:
         pass
+
+    def execute_many(self, commands: list[str], max_workers: int = 4) -> list[dict]:
+        """Run independent read-only commands concurrently."""
+        with ThreadPoolExecutor(max_workers=min(max_workers, len(commands) or 1)) as pool:
+            futures = {pool.submit(self.execute, command): index for index, command in enumerate(commands)}
+            results = [None] * len(commands)
+            for future in as_completed(futures):
+                results[futures[future]] = future.result()
+        return results
 
 
 # ── SSH Executor ───────────────────────────────────────────────
@@ -158,6 +168,31 @@ class SSHExecutor(Executor):
 
         return {"success": False, "error": "Unexpected error: exhausted retries."}
 
+    def execute_many(self, commands: list[str], max_workers: int = 4) -> list[dict]:
+        """Open parallel channels on the one reused SSH transport.
+
+        The connection lifecycle remains protected; only independent command
+        channels run concurrently. Callers must pass read-only whitelisted
+        commands through run_commands_batch().
+        """
+        if not commands:
+            return []
+        with self._lock:
+            client = self._get_client()
+            def one(command: str) -> dict:
+                try:
+                    stdin, stdout, stderr = client.exec_command(command, timeout=COMMAND_TIMEOUT)
+                    exit_code = stdout.channel.recv_exit_status()
+                    return {"success": True, "command": command, "stdout": truncate(stdout.read().decode(errors="replace")), "stderr": truncate(stderr.read().decode(errors="replace")), "exit_code": exit_code}
+                except Exception:
+                    return {"success": False, "command": command, "error": "Diagnostic command failed."}
+            with ThreadPoolExecutor(max_workers=min(max_workers, len(commands))) as pool:
+                futures = {pool.submit(one, command): index for index, command in enumerate(commands)}
+                results = [None] * len(commands)
+                for future in as_completed(futures):
+                    results[futures[future]] = future.result()
+            return results
+
     def close(self) -> None:
         if self._client is not None:
             try:
@@ -250,3 +285,27 @@ def run_command(command: str) -> dict:
 
     executor = get_executor()
     return executor.execute(command)
+
+
+def run_commands_batch(commands: list[str], max_workers: int = 4) -> list[dict]:
+    """Run multiple independent, read-only whitelisted commands in parallel.
+
+    This is deliberately separate from run_command so mutation paths remain
+    serialized and retain the existing audit/approval behavior.
+    """
+    accepted = []
+    results = [None] * len(commands)
+    for index, command in enumerate(commands):
+        if is_command_allowed(command):
+            accepted.append((index, command))
+        else:
+            results[index] = {"success": False, "command": command, "error": f"Command not permitted: '{command}'"}
+    if not accepted:
+        return results
+    mode = Config.EXECUTION_MODE.lower()
+    if mode == "ssh" and (not Config.VPS_HOST or not Config.VPS_SSH_USER):
+        return [{"success": False, "command": command, "error": "VPS is not configured."} if item is None else item for command, item in zip(commands, results)]
+    batch = get_executor().execute_many([command for _, command in accepted], max_workers=max_workers)
+    for (index, _), result in zip(accepted, batch):
+        results[index] = result
+    return results

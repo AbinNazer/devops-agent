@@ -137,3 +137,9 @@ def run_whitelisted_command(command: str) -> dict:
     """
     from app.executor import run_command
     return run_command(command)
+
+
+def run_whitelisted_commands(commands: list[str], max_workers: int = 4) -> list[dict]:
+    """Batch read-only checks over one reused execution connection."""
+    from app.executor import run_commands_batch
+    return run_commands_batch(commands, max_workers=max_workers)

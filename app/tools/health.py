@@ -15,6 +15,13 @@ from app.tools import server as vps_server
 from app.tools import docker as vps_docker
 from app.tools import network as vps_network
 from app.tools import aws as aws_tools
+import threading
+import time
+
+_CACHE_TTL = 20
+_cache_lock = threading.Lock()
+_cached_report = None
+_cached_at = 0.0
 
 
 def _safe(fn, *args, **kwargs) -> dict:
@@ -47,6 +54,11 @@ def check_infrastructure_health() -> dict:
     so the total wall-clock time is bounded by the slowest single lane
     (~1-3 s) rather than the sum of all lanes (previously 4-8+ s).
     """
+    global _cached_report, _cached_at
+    now = time.monotonic()
+    with _cache_lock:
+        if _cached_report is not None and now - _cached_at < _CACHE_TTL:
+            return {**_cached_report, "cached": True, "cache_age_seconds": round(now - _cached_at, 1)}
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     def _local_sweep():
@@ -127,7 +139,11 @@ def check_infrastructure_health() -> dict:
         report["aws"]["ec2"] = {"status": "NOT_CONFIGURED" if not_configured else "UNKNOWN", "data": ec2}
 
     report["overall_status"] = _overall_status(report)
-    return {"success": True, "report": report}
+    result = {"success": True, "report": report, "cached": False}
+    with _cache_lock:
+        _cached_report = result
+        _cached_at = time.monotonic()
+    return result
 
 
 def _entry(result: dict, status_fn) -> dict:

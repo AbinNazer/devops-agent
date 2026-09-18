@@ -1,6 +1,7 @@
 import json
 import logging
 import asyncio
+import time
 
 from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect, HTTPException
 from starlette.websockets import WebSocketState
@@ -64,7 +65,21 @@ async def terminal_ws(websocket: WebSocket, session_id: str):
                 if output is None:
                     # EOF / session closed
                     break
-                await websocket.send_text(json.dumps({"type": "output", "data": output}))
+                # PTYs often deliver a burst as many small chunks. Drain the
+                # already-buffered chunks into one frame to reduce websocket
+                # overhead without adding a deliberate delay to interactive input.
+                chunks = [output]
+                while len(chunks) < 32:
+                    try:
+                        extra = session._queue.get_nowait() if session._queue is not None else None
+                    except asyncio.QueueEmpty:
+                        break
+                    if extra is None:
+                        break
+                    if isinstance(extra, bytes):
+                        extra = extra.decode("utf-8", errors="replace")
+                    chunks.append(extra)
+                await websocket.send_text(json.dumps({"type": "output", "data": "".join(chunks)}))
             except asyncio.CancelledError:
                 break
             except Exception:
@@ -72,10 +87,15 @@ async def terminal_ws(websocket: WebSocket, session_id: str):
 
 
     output_task = asyncio.create_task(read_ssh_output())
-
     try:
         while websocket.client_state == WebSocketState.CONNECTED:
-            data = await websocket.receive_text()
+            try:
+                data = await asyncio.wait_for(websocket.receive_text(), timeout=25)
+            except asyncio.TimeoutError:
+                # Keep mobile browser/proxy connections alive while the shell
+                # is idle. The client can answer with its normal ping path.
+                await websocket.send_text(json.dumps({"type": "ping"}))
+                continue
             msg = json.loads(data)
             msg_type = msg.get("type")
 
