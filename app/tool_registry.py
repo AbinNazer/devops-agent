@@ -480,7 +480,8 @@ TOOL_SCHEMAS = [
                 "properties": {
                     "request": {"type": "string", "description": "The user's diagnostic request or problem description."},
                     "environment": {"type": "string", "description": "Target environment (e.g. 'prod', 'staging')."},
-                    "target": {"type": "string", "description": "Specific target component (e.g. 'backend', 'redis')."}
+                    "target": {"type": "string", "description": "Specific target component or comma-separated targets (e.g. 'backend, redis')."},
+                    "mode": {"type": "string", "enum": ["diagnostic", "immediate"], "description": "Use diagnostic to investigate first, or immediate to skip evidence collection. Immediate still requires safety approval and verification."}
                 },
                 "required": ["request"]
             },
@@ -618,6 +619,7 @@ def run_diagnostic(args):
         request=args.get("request", ""),
         environment=args.get("environment", ""),
         target=args.get("target", ""),
+        mode=args.get("mode", "diagnostic"),
     )
     return {
         "success": result.get("success", False),

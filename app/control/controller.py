@@ -13,6 +13,7 @@ This is the ONLY place the control loop runs. The Agent class can
 delegate to this controller for structured diagnostic/action workflows.
 """
 import logging
+import re
 import time
 from typing import Callable, Dict, List, Optional
 
@@ -81,7 +82,7 @@ class ControlLoop:
         self.memory_repository = memory_repository
         self.ssh_session = ssh_session
 
-    def run(self, request: str, environment: str = "", target: str = "") -> Dict:
+    def run(self, request: str, environment: str = "", target: str = "", mode: str = "diagnostic") -> Dict:
         """
         Execute the full control loop for a user request.
 
@@ -113,7 +114,10 @@ class ControlLoop:
 
             # Phase 4: EVIDENCE COLLECTION (loop)
             state.transition_to(Phase.OBSERVE, "Collecting evidence")
-            self._collect_evidence(state, incident)
+            if mode == "immediate":
+                incident.add_timeline_event("diagnostics_skipped", detail="Immediate mode selected")
+            else:
+                self._collect_evidence(state, incident)
 
             # Phase 5: GENERATE HYPOTHESES
             state.transition_to(Phase.GENERATE_HYPOTHESES, "Generating hypotheses")
@@ -310,6 +314,36 @@ class ControlLoop:
 
     def _create_plan(self, state: ControlState, incident: Incident) -> None:
         """Create an action plan based on hypotheses."""
+        # A direct, explicit restart request should not require a diagnostic
+        # hypothesis first. It still goes through the complete safety pipeline
+        # below: risk assessment, approval, execution, and verification.
+        request_lower = state.request.lower()
+        restart_requested = bool(re.search(r"\b(restart|reboot)\b", request_lower))
+        direct_target = (state.target or "").strip()
+        if not direct_target and restart_requested:
+            match = re.search(
+                r"\b(?:container|service)\s+([a-zA-Z0-9][a-zA-Z0-9_.-]*)\b",
+                state.request,
+                re.IGNORECASE,
+            )
+            if match:
+                direct_target = match.group(1)
+
+        if restart_requested and direct_target:
+            action_type = "restart_service" if re.search(r"\bservice\b", request_lower) else "restart_container"
+            targets = [item.strip() for item in re.split(r",|\band\b", direct_target, flags=re.IGNORECASE) if item.strip()]
+            state.action_plan = [{
+                "action_type": action_type,
+                "target": item,
+                "reason": f"User explicitly requested restarting '{item}'.",
+            } for item in targets]
+            incident.add_timeline_event(
+                "direct_action_plan_created",
+                detail=f"Explicit {action_type} request for {len(targets)} target(s)",
+                phase=Phase.CREATE_PLAN.value,
+            )
+            return
+
         if not state.selected_hypothesis:
             return
 

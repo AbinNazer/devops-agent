@@ -56,6 +56,17 @@ async def terminal_ws(websocket: WebSocket, session_id: str):
     await websocket.accept()
     logger.info("terminal_ws_connected session=%s", session_id)
 
+    # The session is connected in the background so the HTTP create request
+    # returns immediately. Wait here only for the SSH/PTY to become usable.
+    deadline = time.monotonic() + 20
+    while getattr(session, "state", None).value == "connecting" and time.monotonic() < deadline:
+        await asyncio.sleep(0.01)
+    if getattr(session, "state", None).value != "connected":
+        await websocket.send_text(json.dumps({"type": "error", "data": "Terminal connection failed"}))
+        await websocket.close(code=1011, reason="Terminal connection failed")
+        mgr.close_session(session_id)
+        return
+
 
     async def read_ssh_output():
         while websocket.client_state == WebSocketState.CONNECTED:

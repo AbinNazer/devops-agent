@@ -53,6 +53,13 @@ FAILOVER_ERRORS = (
     "model_not_found", "model_unavailable", "model_overloaded",
     "provider_unavailable", "temporarily_unavailable",
     "overloaded", "capacity",
+    # Some OpenAI-compatible gateways return HTTP 400 when the selected
+    # model cannot accept function/tool schemas. That is a provider/model
+    # capability issue, so another configured provider should handle it.
+    "tool use", "tool_use", "tool calling", "tool_calling",
+    "does not support tools", "tools are not supported",
+    "model does not support", "unsupported tool", "unsupported parameter",
+    "no endpoints found that support",
 )
 
 # Errors that should NOT trigger failover (the same provider should not help)

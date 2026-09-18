@@ -1,4 +1,5 @@
 import logging
+import asyncio
 import time
 from typing import Dict, Optional
 
@@ -35,10 +36,20 @@ class TerminalManager:
             )
         session.rows = rows
         session.cols = cols
-        await session.connect()
         self._sessions[session.id] = session
         logger.info("terminal_created session=%s mode=%s total=%d", session.id, mode, len(self._sessions))
+        # Return the session ID immediately. SSH connection and PTY setup can
+        # take several seconds; the WebSocket will wait for this same session
+        # to become ready instead of making the HTTP request block first.
+        asyncio.create_task(self._connect_session(session), name=f"terminal-connect-{session.id}")
         return session
+
+    async def _connect_session(self, session):
+        try:
+            await session.connect()
+        except Exception:
+            self._sessions.pop(session.id, None)
+            session.close()
 
     def get_session(self, session_id: str) -> Optional[TerminalSession]:
         return self._sessions.get(session_id)

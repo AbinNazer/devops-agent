@@ -445,6 +445,8 @@ def build_provider(config) -> LLMProvider:
         return OpenAIProvider(
             api_key=config.OPENAI_API_KEY,
             model=config.OPENAI_MODEL,
+            base_url=getattr(config, "OPENAI_BASE_URL", ""),
+            label="OmniRoute" if config.OPENAI_BASE_URL else "OpenAI",
         )
 
     if config.LLM_PROVIDER == "anthropic":

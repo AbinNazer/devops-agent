@@ -4,6 +4,9 @@ var writeBuffer = [];
 var writeRafId = null;
 var bufferByteLen = 0;
 var resizeTimer = null;
+var wsOpened = false;
+var connectTimer = null;
+var reconnectAttempted = false;
 
 function flushBuffer() {
   writeRafId = null;
@@ -81,6 +84,7 @@ function initTerm() {
 }
 
 function startSess() {
+  clearTimeout(connectTimer);
   setDot("wait");
   document.getElementById("cOv").style.display = "flex";
   document.getElementById("eOv").style.display = "none";
@@ -99,8 +103,18 @@ function connectWS() {
     return;
   }
   var p = location.protocol==="https:" ? "wss:" : "ws:";
+  wsOpened = false;
   ws = new WebSocket(p+"//"+location.host+"/ws/terminal/"+sid);
+  connectTimer = setTimeout(function() {
+    if (ws && ws.readyState !== WebSocket.OPEN) {
+      try { ws.close(); } catch(e) {}
+      showErr("Terminal connection timed out. Check SSH/local mode settings.");
+    }
+  }, 22000);
   ws.onopen = function() {
+    clearTimeout(connectTimer);
+    wsOpened = true;
+    reconnectAttempted = false;
     setDot("on");
     document.getElementById("cOv").style.display = "none";
     document.getElementById("eOv").style.display = "none";
@@ -116,11 +130,18 @@ function connectWS() {
     } catch(x){}
   };
   ws.onclose = function() {
+    clearTimeout(connectTimer);
     flushBuffer();
     setDot("off");
-    if(term) term.write("\r\n\x1b[33m[Disconnected]\x1b[0m\r\n");
+    if (!wsOpened) {
+      showErr("Terminal connection failed. Check the server logs and execution mode.");
+    } else if(term) {
+      term.write("\r\n\x1b[33m[Disconnected]\x1b[0m\r\n");
+    }
   };
-  ws.onerror = function(){ showErr("WebSocket connection failed"); };
+  ws.onerror = function(){
+    if (!wsOpened) showErr("WebSocket connection failed");
+  };
 }
 
 function send(d) {
