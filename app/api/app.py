@@ -24,7 +24,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, RedirectResponse
 from pydantic import BaseModel
 
 from fastapi.staticfiles import StaticFiles
@@ -114,6 +114,16 @@ def web_app():
     html_path = os.path.join(os.path.dirname(__file__), '..', 'static', 'index.html')
     with open(html_path, encoding="utf-8") as f:
         return HTMLResponse(content=f.read())
+
+
+@app.get("/sw.js")
+def service_worker():
+    """Serve the PWA service worker with a root scope so home-screen launches can cache the app shell."""
+    return FileResponse(
+        os.path.join(STATIC_DIR, "sw.js"),
+        media_type="application/javascript",
+        headers={"Service-Worker-Allowed": "/", "Cache-Control": "no-cache"},
+    )
 
 
 class LoginRequest(BaseModel):

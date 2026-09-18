@@ -1,10 +1,45 @@
 (() => {
   const $ = id => document.getElementById(id);
+  const THEMES = {
+    dark: '#08111f',
+    light: '#dfe9f3',
+    ember: '#140c0a',
+    violet: '#0d0b18'
+  };
+  const WELCOME_HTML = '<div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>What are we investigating?</h1><div class="quick-actions"><button type="button" data-prompt="Check infrastructure health">Check infrastructure</button><button type="button" data-prompt="Show running containers">Show containers</button><button type="button" data-prompt="Check CPU and memory usage">Check CPU / memory</button><button type="button" data-prompt="Show recent errors">Recent errors</button></div></div>';
   let conversationId;
   const messages = $('messages');
   const provider = $('provider');
   const appShell = document.querySelector('.app-shell');
   const escapeHtml = value => value.replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+
+  function applyTheme(theme) {
+    const next = THEMES[theme] ? theme : 'dark';
+    document.documentElement.dataset.theme = next;
+    const color = THEMES[next];
+    const meta = $('theme-color');
+    if (meta) meta.setAttribute('content', color);
+    try { localStorage.setItem('jarvis.theme', next); } catch (err) {}
+    document.querySelectorAll('[data-theme-value]').forEach(button => {
+      button.classList.toggle('active', button.dataset.themeValue === next);
+    });
+    if ($('setting-theme')) $('setting-theme').value = next;
+    return next;
+  }
+
+  function hideBoot() {
+    const boot = $('boot-screen');
+    if (boot) boot.hidden = true;
+    document.documentElement.removeAttribute('data-boot');
+  }
+
+  function setSessionHint(on) {
+    try {
+      if (on) localStorage.setItem('jarvis.sessionHint', '1');
+      else localStorage.removeItem('jarvis.sessionHint');
+    } catch (err) {}
+  }
+
   function renderMarkdown(value) {
     let html = escapeHtml(value || '');
     html = html.replace(/```([\s\S]*?)```/g, '<pre><code>$1</code></pre>');
@@ -28,6 +63,7 @@
     if (role === 'assistant') { const actions = document.createElement('div'); actions.className = 'message-actions'; actions.innerHTML = '<button type="button" data-copy aria-label="Copy response" title="Copy response">⧉</button>'; el.querySelector('.message-content').append(actions); }
     messages.append(el); messages.scrollTop = messages.scrollHeight; return body;
   }
+
   async function init() {
     const savedConversation = localStorage.getItem('jarvis.conversationId');
     const conversationRequest = savedConversation
@@ -45,7 +81,23 @@
     data.providers.forEach(p => { const option = new Option(`${p.name}${p.available ? '' : ' · unavailable'}`, p.id); option.disabled = !p.available; provider.add(option); });
     if (data.active_provider) provider.value = data.active_provider.split('(')[0].trim().toLowerCase();
   }
-  function showApp() { $('login-screen').hidden = true; appShell.hidden = false; }
+
+  function showApp() {
+    setSessionHint(true);
+    $('login-screen').hidden = true;
+    appShell.hidden = false;
+    hideBoot();
+  }
+
+  function showLoginScreen() {
+    setSessionHint(false);
+    appShell.hidden = true;
+    $('register-form').hidden = true;
+    $('login-form').hidden = false;
+    $('login-screen').hidden = false;
+    hideBoot();
+  }
+
   async function loadStatus() {
     $('stat-agent').textContent = 'Checking…';
     try {
@@ -57,28 +109,33 @@
       $('status-detail').textContent = i.cached ? 'Using the backend health-check cache.' : 'Fresh health check completed.';
     } catch (err) { $('stat-agent').textContent = 'Offline'; $('stat-infra').textContent = 'Unavailable'; $('status-detail').textContent = 'Could not reach the backend.'; }
   }
+
   function showLogin() { $('register-form').hidden = true; $('login-form').hidden = false; $('register-error').textContent = ''; }
   $('login-form').onsubmit = async e => { e.preventDefault(); const error = $('login-error'); const form = $('login-form'); error.textContent = ''; form.classList.add('is-loading'); const response = await fetch('/api/auth/login', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({username:$('login-username').value.trim(), password:$('login-password').value})}); const data = await response.json().catch(() => ({})); form.classList.remove('is-loading'); if (!response.ok) { error.textContent = data.detail || 'Invalid username or password.'; form.classList.add('has-error'); setTimeout(() => form.classList.remove('has-error'), 450); return; } showApp(); init().catch(err => addMessage('assistant', `Unable to connect: ${err.message}`)); };
   $('register-toggle').onclick = () => { $('login-form').hidden = true; $('register-form').hidden = false; $('register-first-name').focus(); };
   $('register-back').onclick = showLogin;
   $('register-form').onsubmit = async e => { e.preventDefault(); const form = $('register-form'); const error = $('register-error'); error.textContent = ''; if ($('register-password').value !== $('register-confirm-password').value) { error.textContent = 'Passwords do not match.'; return; } form.classList.add('is-loading'); const response = await fetch('/api/auth/register', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({first_name:$('register-first-name').value.trim(), last_name:$('register-last-name').value.trim(), email:$('register-email').value.trim(), username:$('register-username').value.trim(), password:$('register-password').value, confirm_password:$('register-confirm-password').value})}); const data = await response.json().catch(() => ({})); form.classList.remove('is-loading'); if (!response.ok) { error.textContent = data.detail || 'Account creation failed.'; return; } showApp(); init().catch(err => addMessage('assistant', `Unable to connect: ${err.message}`)); };
+
   async function clearChat() {
     if (!conversationId || !confirm('Clear this chat?')) return;
     await fetch(`/api/conversations/${conversationId}`, {method:'DELETE'});
     conversationId = (await (await fetch('/api/conversations', {method:'POST'})).json()).id;
     localStorage.setItem('jarvis.conversationId', conversationId);
-    messages.innerHTML = '<div class="welcome"><span class="eyebrow">DEVOPS CONSOLE</span><h1>What are we investigating?</h1><div class="quick-actions"><button type="button" data-prompt="Check infrastructure health">Check infrastructure</button><button type="button" data-prompt="Show running containers">Show containers</button><button type="button" data-prompt="Check CPU and memory usage">Check CPU / memory</button><button type="button" data-prompt="Show recent errors">Recent errors</button></div></div>';
+    messages.innerHTML = WELCOME_HTML;
     $('menu').hidden = true;
   }
+
   provider.onchange = () => fetch('/api/providers/switch', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({provider:provider.value})});
+
   async function sendMessage(text) {
     addMessage('user', text); if (/^\s*(give me|open) terminal\s*$/i.test(text)) openTerminal();
     const target = addMessage('assistant', '');
     target.innerHTML = '<div class="assistant-status"><span class="typing"><i></i><i></i><i></i></span> <span class="status-text">Thinking…</span></div>';
+    let streamed = '';
     try {
       const response = await fetch(`/api/conversations/${conversationId}/chat/stream`, {
         method: 'POST',
-        headers: {'Content-Type': 'application/json'},
+        headers: {'Content-Type': 'application/json', 'Accept': 'text/event-stream'},
         body: JSON.stringify({message: text, provider: provider.value})
       });
       if (!response.ok) { target.textContent = `Request failed (${response.status})`; return; }
@@ -99,13 +156,12 @@
             if (event.type === 'status' && statusEl) {
               statusEl.textContent = event.content || 'Thinking…';
             } else if (event.type === 'tool_call' && statusEl) {
-              const friendlyName = (event.name || '').replace(/_/g, ' ');
-              statusEl.textContent = `Checking ${friendlyName}…`;
+              statusEl.textContent = `Checking ${(event.name || '').replace(/_/g, ' ')}…`;
             } else if (event.type === 'tool_result' && statusEl) {
-              const friendlyName = (event.name || '').replace(/_/g, ' ');
-              statusEl.textContent = `Completed ${friendlyName}…`;
-            } else if (event.type === 'text') {
-              target.innerHTML = renderMarkdown(event.content);
+              statusEl.textContent = `Completed ${(event.name || '').replace(/_/g, ' ')}…`;
+            } else if (event.type === 'text' || event.type === 'delta') {
+              streamed = event.delta ? streamed + event.delta : (event.content || streamed);
+              target.innerHTML = renderMarkdown(streamed);
             } else if (event.type === 'error') {
               target.textContent = event.content;
             }
@@ -113,10 +169,27 @@
           keepChatAtBottom();
         }
       }
+      // Some servers/proxies close immediately after the final event without
+      // adding a second blank line. Process that buffered event as well.
+      if (buffer.trim()) {
+        const line = buffer.split('\n').find(x => x.startsWith('data: '));
+        if (line) {
+          try {
+            const event = JSON.parse(line.slice(6));
+            if (event.type === 'text' || event.type === 'delta') {
+              streamed = event.delta ? streamed + event.delta : (event.content || streamed);
+              target.innerHTML = renderMarkdown(streamed);
+            } else if (event.type === 'error') {
+              target.textContent = event.content;
+            }
+          } catch (pe) {}
+        }
+      }
     } catch (err) {
       target.textContent = `Connection error: ${err.message}`;
     }
   }
+
   function openTerminal() { window.location.assign('/terminal'); }
   const messageInput = $('message');
   function autoResizeInput() {
@@ -141,12 +214,17 @@
   $('menu-button').onclick = () => { const menu = $('menu'); menu.hidden = !menu.hidden; $('menu-button').setAttribute('aria-expanded', String(!menu.hidden)); };
   $('clear-chat').onclick = () => clearChat().catch(err => addMessage('assistant', `Unable to clear chat: ${err.message}`));
   $('menu-terminal').onclick = () => { $('menu').hidden = true; openTerminal(); };
-  $('logout').onclick = async () => { await fetch('/api/auth/logout', {method:'POST'}); location.reload(); };
-  $('menu-status').onclick = () => { $('menu').hidden = true; document.querySelector('.chat-panel').hidden = true; $('status-panel').hidden = false; loadStatus(); };
-  $('menu-settings').onclick = async () => { $('menu').hidden = true; document.querySelector('.chat-panel').hidden = true; $('status-panel').hidden = true; $('settings-panel').hidden = false; await loadSettings(); };
+  $('logout').onclick = async () => { setSessionHint(false); await fetch('/api/auth/logout', {method:'POST'}); location.reload(); };
+  function showPanel(name) {
+    document.querySelector('.chat-panel').hidden = name !== 'chat';
+    $('status-panel').hidden = name !== 'status';
+    $('settings-panel').hidden = name !== 'settings';
+  }
+  $('menu-status').onclick = () => { $('menu').hidden = true; showPanel('status'); loadStatus(); };
+  $('menu-settings').onclick = async () => { $('menu').hidden = true; showPanel('settings'); await loadSettings(); };
   $('status-refresh').onclick = loadStatus;
-  $('back-chat').onclick = () => { $('status-panel').hidden = true; document.querySelector('.chat-panel').hidden = false; };
-  $('settings-back').onclick = () => { $('settings-panel').hidden = true; document.querySelector('.chat-panel').hidden = false; };
+  $('back-chat').onclick = () => showPanel('chat');
+  $('settings-back').onclick = () => showPanel('chat');
   document.querySelectorAll('[data-settings-section]').forEach(button => button.onclick = () => { document.querySelectorAll('.settings-nav-item').forEach(item => item.classList.toggle('active', item === button)); document.querySelectorAll('[data-settings-section-content]').forEach(section => section.hidden = section.dataset.settingsSectionContent !== button.dataset.settingsSection); if (button.dataset.settingsSection === 'infrastructure') loadInfrastructureTargets(); });
   $('research-form').onsubmit = async event => { event.preventDefault(); const status = $('research-status'); const query = $('research-query').value.trim(); status.textContent = 'Starting research…'; $('research-results').textContent = ''; const response = await fetch('/api/research/learn/stream', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify({tool:query, version:$('research-version').value.trim(), refresh:$('research-refresh').checked})}); if (!response.ok) { const data = await response.json().catch(() => ({})); status.textContent = data.detail || 'Research failed'; return; } const reader = response.body.getReader(); const decoder = new TextDecoder(); let buffer = ''; while (true) { const {value, done} = await reader.read(); if (done) break; buffer += decoder.decode(value, {stream:true}); const chunks = buffer.split('\n\n'); buffer = chunks.pop(); chunks.forEach(chunk => { const line = chunk.split('\n').find(item => item.startsWith('data: ')); if (!line) return; const eventData = JSON.parse(line.slice(6)); if (eventData.stage === 'started') status.textContent = `Preparing research for ${eventData.tool}…`; if (eventData.stage === 'searching_official_docs') status.textContent = 'Searching official documentation…'; if (eventData.stage === 'completed') { const data = eventData.result; status.textContent = data.status === 'already_known' ? 'This skill is already cached.' : 'Research complete — skill saved.'; $('research-results').innerHTML = `<strong>${escapeHtml(data.skill || query)}</strong><p>Sources: ${(data.sources || []).length}. Local version and project references were recorded. No execution performed.</p>`; } if (eventData.stage === 'failed') status.textContent = eventData.result?.error || 'Research failed'; }); } };
   $('target-kind').onchange = () => { const aws = $('target-kind').value === 'aws'; $('target-host-label').hidden = aws; $('target-username').closest('label').hidden = aws; $('target-region-label').hidden = !aws; $('target-endpoint-label').hidden = !aws; };
@@ -154,11 +232,17 @@
   $('infrastructure-form').onsubmit = async event => { event.preventDefault(); const status = $('target-status'); const payload = {name:$('target-name').value.trim(), kind:$('target-kind').value, host:$('target-host').value.trim(), port:$('target-port').value ? Number($('target-port').value) : null, username:$('target-username').value.trim(), region:$('target-region').value.trim(), endpoint:$('target-endpoint').value.trim(), notes:$('target-notes').value.trim()}; const response = await fetch('/api/settings/infrastructure', {method:'POST', headers:{'Content-Type':'application/json'}, body:JSON.stringify(payload)}); const data = await response.json().catch(() => ({})); if (!response.ok) { status.textContent = data.detail || 'Could not save target'; return; } event.target.reset(); status.textContent = 'Infrastructure target added'; loadInfrastructureTargets(); };
   $('infrastructure-targets').onclick = async event => { const button = event.target.closest('[data-delete-target]'); if (!button) return; await fetch(`/api/settings/infrastructure/${button.dataset.deleteTarget}`, {method:'DELETE'}); loadInfrastructureTargets(); };
   let settingsProviders = [];
-  async function loadSettings() { const [user, org, providers] = await Promise.all([fetch('/api/settings/user'), fetch('/api/settings/organization'), fetch('/api/settings/providers')]); const userData = await user.json(); const orgData = await org.json(); const providerData = await providers.json(); settingsProviders = providerData.providers || []; $('setting-theme').value = userData.values.theme || 'dark'; document.documentElement.dataset.theme = $('setting-theme').value; $('setting-timezone').value = orgData.values.timezone || ''; const preferences = providerData.preferences || {}; $('setting-fallback').checked = preferences.fallback_enabled !== false; renderProviderSettings(preferences); loadInfrastructureTargets(); }
+  async function loadSettings() { const [user, org, providers] = await Promise.all([fetch('/api/settings/user'), fetch('/api/settings/organization'), fetch('/api/settings/providers')]); const userData = await user.json(); const orgData = await org.json(); const providerData = await providers.json(); settingsProviders = providerData.providers || []; applyTheme(userData.values.theme || localStorage.getItem('jarvis.theme') || 'dark'); $('setting-timezone').value = orgData.values.timezone || ''; const preferences = providerData.preferences || {}; $('setting-fallback').checked = preferences.fallback_enabled !== false; renderProviderSettings(preferences); loadInfrastructureTargets(); }
   function renderProviderSettings(preferences = {}) { const selected = preferences.primary_provider || provider.value || settingsProviders.find(p => p.configured)?.id || settingsProviders[0]?.id || ''; $('setting-primary-provider').replaceChildren(...settingsProviders.map(p => new Option(`${p.name || p.id}${p.configured ? '' : ' · not configured'}`, p.id))); $('setting-primary-provider').value = selected; const models = settingsProviders.find(p => p.id === selected)?.models || []; $('setting-primary-model').replaceChildren(...models.map(m => new Option(m.id, m.id))); $('setting-primary-model').value = preferences.primary_model || models[0]?.id || ''; $('settings-providers').replaceChildren(...settingsProviders.map(p => { const row = document.createElement('div'); row.className = 'provider-row'; row.innerHTML = `<strong>${escapeHtml(p.name || p.id)}</strong><span class="status-badge">${p.configured ? 'configured' : 'not configured'}</span>`; return row; })); }
   async function saveSettings(scope, values) { const response = await fetch(`/api/settings/${scope}`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({values})}); if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Could not save settings'); return response.json(); }
   $('setting-primary-provider').onchange = () => renderProviderSettings({primary_provider:$('setting-primary-provider').value});
-  $('save-user-settings').onclick = async () => { const status = $('user-settings-status'); try { document.documentElement.dataset.theme = $('setting-theme').value; await saveSettings('user', {theme:$('setting-theme').value}); status.textContent = 'Saved'; } catch (err) { status.textContent = err.message; } };
+  $('setting-theme').onchange = () => applyTheme($('setting-theme').value);
+  $('theme-swatches').onclick = event => {
+    const button = event.target.closest('[data-theme-value]');
+    if (!button) return;
+    applyTheme(button.dataset.themeValue);
+  };
+  $('save-user-settings').onclick = async () => { const status = $('user-settings-status'); try { const theme = applyTheme($('setting-theme').value); await saveSettings('user', {theme}); status.textContent = 'Saved'; } catch (err) { status.textContent = err.message; } };
   $('save-org-settings').onclick = async () => { const status = $('org-settings-status'); try { await saveSettings('organization', {timezone:$('setting-timezone').value.trim()}); status.textContent = 'Saved'; } catch (err) { status.textContent = err.message; } };
   $('save-provider-settings').onclick = async () => { const status = $('provider-settings-status'); try { const providerId = $('setting-primary-provider').value; const values = {primary_provider:providerId, primary_model:$('setting-primary-model').value, fallback_enabled:$('setting-fallback').checked}; await saveSettings('providers', values); const key = $('setting-provider-key').value.trim(); if (key) { const response = await fetch(`/api/settings/providers/${providerId}/credential`, {method:'PUT', headers:{'Content-Type':'application/json'}, body:JSON.stringify({api_key:key})}); if (!response.ok) throw new Error((await response.json().catch(() => ({}))).detail || 'Could not save provider key'); $('setting-provider-key').value = ''; } status.textContent = 'Provider settings saved'; } catch (err) { status.textContent = err.message; } };
   document.addEventListener('click', e => { if (!e.target.closest('.menu-wrap')) $('menu').hidden = true; });
@@ -193,6 +277,20 @@
       if (window.scrollY > 0) window.scrollTo(0, 0);
     });
   }
-  fetch('/api/auth/me').then(r => r.json()).then(data => { if (data.authenticated) { showApp(); return init(); } $('login-screen').hidden = false; appShell.hidden = true; }).catch(() => { $('login-screen').hidden = false; appShell.hidden = true; });
-  if ('serviceWorker' in navigator) window.addEventListener('load', () => navigator.serviceWorker.register('/static/sw.js').catch(() => {}));
+
+  try { applyTheme(localStorage.getItem('jarvis.theme') || 'dark'); } catch (err) { applyTheme('dark'); }
+
+  fetch('/api/auth/me').then(r => r.json()).then(data => {
+    if (data.authenticated) {
+      showApp();
+      return init();
+    }
+    showLoginScreen();
+  }).catch(() => showLoginScreen());
+
+  const registerWorker = () => navigator.serviceWorker.register('/sw.js', {scope: '/'}).catch(() => {});
+  if ('serviceWorker' in navigator) {
+    if ('requestIdleCallback' in window) requestIdleCallback(registerWorker);
+    else window.addEventListener('load', registerWorker);
+  }
 })();
