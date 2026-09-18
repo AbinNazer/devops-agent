@@ -89,7 +89,13 @@ def evaluate_approval(request: ApprovalRequest) -> Dict:
     This is the decision point — the LLM can only REQUEST, this function
     DECIDES whether execution is permitted.
     """
-    requirement = determine_approval_requirement(request.risk_level)
+    # Restarts mutate infrastructure even when the calculated risk is low.
+    # Never auto-approve a write action; the operator must explicitly confirm
+    # it in the CLI or through a future web approval flow.
+    if request.action_type in {"restart_container", "restart_service"}:
+        requirement = "ask"
+    else:
+        requirement = determine_approval_requirement(request.risk_level)
 
     if requirement == "auto":
         return {

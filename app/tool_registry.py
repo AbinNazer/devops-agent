@@ -602,24 +602,42 @@ _DISPATCH = {
 
 # Phase 5: control loop functions (must be defined before _DISPATCH references them)
 _control_loop_instance = None
+_control_approval_callback = None
+
+
+def set_control_approval_callback(callback):
+    """Set the interactive approval handler used by the current process."""
+    global _control_approval_callback, _control_loop_instance
+    _control_approval_callback = callback
+    # Rebuild lazily so a CLI callback configured during startup is used.
+    _control_loop_instance = None
 
 
 def _get_control_loop():
     """Lazy-initialize the control loop with the shared tool executor."""
     global _control_loop_instance
     if _control_loop_instance is None:
-        _control_loop_instance = ControlLoop(execute_tool_fn=execute_tool)
+        _control_loop_instance = ControlLoop(
+            execute_tool_fn=execute_tool,
+            user_approve_fn=_control_approval_callback,
+        )
     return _control_loop_instance
 
 
 def run_diagnostic(args):
     """Run a structured diagnostic workflow through the Phase 5 control loop."""
     controller = _get_control_loop()
+    request = args.get("request", "")
+    mode = args.get("mode")
+    if not mode:
+        mode = "immediate" if any(
+            word in request.lower().split() for word in ("restart", "reboot")
+        ) else "diagnostic"
     result = controller.run(
-        request=args.get("request", ""),
+        request=request,
         environment=args.get("environment", ""),
         target=args.get("target", ""),
-        mode=args.get("mode", "diagnostic"),
+        mode=mode,
     )
     return {
         "success": result.get("success", False),

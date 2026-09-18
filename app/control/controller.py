@@ -128,9 +128,14 @@ class ControlLoop:
             self._create_plan(state, incident)
 
             # Phase 7: RISK ASSESSMENT + APPROVAL + EXECUTION
-            if state.action_plan and can_take_action(state):
+            # Immediate mode is an explicit user-selected action path. It does
+            # not require diagnostic hypotheses or a confidence score first;
+            # target validation, policy, approval, and the executor still run.
+            if state.action_plan and (mode == "immediate" or can_take_action(state)):
                 state.transition_to(Phase.RISK_ASSESSMENT, "Assessing action risk")
-                action_result = self._execute_action_flow(state, incident)
+                action_result = self._execute_action_flow(
+                    state, incident, verify_after=mode != "immediate"
+                )
                 if action_result:
                     state.action_results.append(action_result)
             else:
@@ -369,7 +374,7 @@ class ControlLoop:
                 phase=Phase.CREATE_PLAN.value,
             )
 
-    def _execute_action_flow(self, state: ControlState, incident: Incident) -> Optional[Dict]:
+    def _execute_action_flow(self, state: ControlState, incident: Incident, verify_after: bool = True) -> Optional[Dict]:
         """Execute the full action flow: risk → approval → execute → verify → rollback."""
         for action in state.action_plan:
             if state.action_count >= MAX_ACTIONS_PER_RUN:
@@ -458,6 +463,18 @@ class ControlLoop:
                     f"Action failed: {exec_result.get('error', 'unknown')}",
                 )
                 return exec_result
+
+            if not verify_after:
+                state.set_outcome(
+                    OutcomeStatus.SUCCESS,
+                    f"Action '{action_type}' on '{target}' executed; post-action verification was skipped by request.",
+                )
+                incident.add_timeline_event(
+                    "verification_skipped",
+                    detail="Immediate mode selected",
+                    phase=Phase.EXECUTE.value,
+                )
+                continue
 
             # Verify
             state.transition_to(Phase.VERIFY, f"Verifying {action_type}")

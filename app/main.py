@@ -21,7 +21,7 @@ import sys
 from app.config import Config, validate_vps_config
 from app.llm_provider import build_provider
 from app.llm_router import build_router
-from app.tool_registry import TOOL_SCHEMAS, TOOL_NAMES, execute_tool, handle_memory_command
+from app.tool_registry import TOOL_SCHEMAS, TOOL_NAMES, execute_tool, handle_memory_command, set_control_approval_callback
 from app.agent import Agent, SYSTEM_PROMPT
 from app.session import save_session, load_session, list_sessions
 from app.logging_config import setup_logging
@@ -85,6 +85,16 @@ def _run_health_check():
         _print_system(f"VPS reachable — {result['latency_ms']}ms round trip.")
 
 
+def _approve_control_action(prompt: str) -> bool:
+    """Ask for explicit approval before a restart action in the CLI."""
+    _print_system("\n" + prompt)
+    try:
+        answer = input("Approve this action? [y/N] ").strip().lower()
+    except (KeyboardInterrupt, EOFError):
+        return False
+    return answer in {"y", "yes"}
+
+
 def main():
     # Fail loudly and early on VPS config problems, rather than only
     # discovering them on the first tool call mid-conversation.
@@ -102,6 +112,7 @@ def main():
         print(f"Couldn't start LLM provider: {e}")
         sys.exit(1)
 
+    set_control_approval_callback(_approve_control_action)
     agent = Agent(provider=provider, tool_schemas=TOOL_SCHEMAS, execute_tool_fn=execute_tool, memory_command_handler=handle_memory_command, allowed_tool_names=TOOL_NAMES)
     history = fresh_history()
 

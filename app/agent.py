@@ -25,13 +25,15 @@ execute raw shell strings. All infrastructure interaction goes through tools.
 the `run_diagnostic` tool — it routes through a controlled pipeline with \
 risk assessment, approval, verification, and rollback. Never attempt to \
 restart anything directly. When the user asks to restart something, call \
-`run_diagnostic` with their request and let the control loop handle it.
+`run_diagnostic` with mode="immediate" and let the control loop handle it. \
+Do not inspect containers first unless the user explicitly asks for \
+diagnostics, logs, health, or verification.
 - If the user asks to restart something but doesn't specify a target \
   (container name or service name), ask them which container or service \
   before calling run_diagnostic — do not guess or pick one.
 - If the user asks to restart multiple containers or services, ask one concise \
 question before acting: "Run diagnostics first, or restart immediately?" \
-If they choose diagnostics, call run_diagnostic normally. If they choose \
+If they choose diagnostics, call run_diagnostic with mode="diagnostic". If they choose \
 immediately, call run_diagnostic with mode="immediate". Never silently choose \
 between those modes.
 - The following remain PERMANENTLY BLOCKED and must never be attempted: \
@@ -199,6 +201,23 @@ class Agent:
                 logger.info("tool_selected=%s arguments=%s", tc["name"], tc["arguments"])
                 return self.execute_tool_fn(tc["name"], tc["arguments"])
 
+            # An immediate restart is an explicit mutation request. Once the
+            # model has supplied the resolved target, do not let it add a
+            # second round of status/health calls or repeat the action. This
+            # keeps the operation fast and prevents tool-loop exhaustion.
+            immediate_restart = next(
+                (
+                    tc for tc in runnable
+                    if tc["name"] == "run_diagnostic"
+                    and tc.get("arguments", {}).get("mode") == "immediate"
+                    and any(word in tc.get("arguments", {}).get("request", "").lower().split()
+                            for word in ("restart", "reboot"))
+                ),
+                None,
+            )
+            if immediate_restart is not None:
+                runnable = [immediate_restart]
+
             parallel = len(runnable) > 1 and all(tc["name"] in PARALLEL_READ_TOOLS for tc in runnable)
             if parallel:
                 with ThreadPoolExecutor(max_workers=min(4, len(runnable))) as pool:
@@ -214,6 +233,14 @@ class Agent:
                 if on_tool_result:
                     on_tool_result(tc["name"], tool_result)
                 history.append(self.provider.tool_result_message(tc, tool_result))
+
+            if immediate_restart is not None:
+                result = results[0] if results else {}
+                actions = result.get("actions_taken") or []
+                if actions:
+                    completed = sum(1 for action in actions if action.get("result", {}).get("success"))
+                    return f"Restart operation completed: {completed}/{len(actions)} action(s) succeeded."
+                return result.get("summary") or result.get("outcome") or "Restart operation did not execute."
 
         # Safety valve hit — return whatever text we have, or a clear admission
         logger.warning("max_tool_iterations_reached")
