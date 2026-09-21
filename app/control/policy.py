@@ -63,7 +63,7 @@ class ApprovedAction:
 # ── Allowed actions (explicitly whitelisted) ──
 
 # Safe container actions — only restart of approved containers
-ALLOWED_CONTAINER_ACTIONS = {"restart_container"}
+ALLOWED_CONTAINER_ACTIONS = {"start_container", "stop_container", "restart_container"}
 
 # Safe service actions — only restart of approved services
 ALLOWED_SERVICE_ACTIONS = {"restart_service"}
@@ -108,6 +108,8 @@ _SAFE_NAME_RE = re.compile(r"^[a-zA-Z0-9_.\-]{1,128}$")
 
 # Allowed restart command templates (must match whitelist patterns)
 _ALLOWED_RESTART_COMMANDS = {
+    "start_container": "docker start {target}",
+    "stop_container": "docker stop {target}",
     "restart_container": "docker restart {target}",
     "restart_service": "systemctl restart {target}",
 }

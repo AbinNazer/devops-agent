@@ -23,7 +23,7 @@ from typing import Optional
 import paramiko
 
 from app.config import Config
-from app.ssh_whitelist import is_command_allowed
+from app.ssh_whitelist import is_command_allowed, is_action_command_allowed
 
 logger = logging.getLogger("executor")
 audit_logger = logging.getLogger("ssh_audit")
@@ -285,6 +285,13 @@ def run_command(command: str) -> dict:
 
     executor = get_executor()
     return executor.execute(command)
+
+
+def run_action_command(command: str) -> dict:
+    """Execute a policy-approved mutation through the selected local/SSH executor."""
+    if not is_action_command_allowed(command):
+        return {"success": False, "error": "Action command is not whitelisted"}
+    return get_executor().execute(command)
 
 
 def run_commands_batch(commands: list[str], max_workers: int = 4) -> list[dict]:

@@ -46,6 +46,10 @@ class Config:
     # Execution mode: "ssh" (laptop -> VPS) or "local" (on VPS directly)
     EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "ssh")
 
+    # Tool Factory remote search: absolute paths the search tools may read
+    # under (comma-separated, server-side only — never supplied per request).
+    SEARCH_ALLOWED_ROOTS = os.environ.get("JARVIS_SEARCH_ALLOWED_ROOTS", "")
+
     # Jenkins (runs as a Docker container on the VPS)
     JENKINS_CONTAINER_NAME = os.environ.get("JENKINS_CONTAINER_NAME", "jenkins")
 

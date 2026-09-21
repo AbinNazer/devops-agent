@@ -24,7 +24,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, RedirectResponse
+from fastapi.responses import FileResponse, HTMLResponse, StreamingResponse, RedirectResponse, JSONResponse
 from pydantic import BaseModel
 
 from fastapi.staticfiles import StaticFiles
@@ -1031,6 +1031,235 @@ def worker_heartbeat(worker_id: str, body: dict, request: Request):
         return {"worker": get_control_plane().public(worker)}
     except PermissionError as exc:
         raise HTTPException(status_code=401, detail=str(exc))
+
+# ── Tool Factory & project intelligence endpoints ────────────────────
+
+
+def _tool_factory_identity(request: Request):
+    """Resolve the authenticated user + tenant context for tool endpoints."""
+    username = session_user(request.cookies.get("jarvis_session"))
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    user_id = new_user_id(username)
+    context = registry.context_for(user_id)
+    return user_id, context
+
+
+def _require_permission(context, permission: str):
+    if not context.can(permission):
+        raise HTTPException(status_code=403, detail=f"Missing permission: {permission}")
+
+
+def _tool_error_response(exc: Exception):
+    from app.tool_factory.validation import ToolValidationError
+    if isinstance(exc, ToolValidationError):
+        return {"success": False, "errors": [issue.to_dict() for issue in exc.issues]}
+    return {"success": False, "error": str(exc)}
+
+
+@app.get("/api/tools")
+def list_factory_tools(request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.read")
+    from app.tool_factory.service import get_tool_factory_service
+    from app.tool_factory import builtin
+    builtin.ensure_builtin_tools()
+    service = get_tool_factory_service()
+    tools = [definition.to_public() for definition in service.list_tools(context.organization.id)]
+    return {"success": True, "tools": tools}
+
+
+@app.post("/api/tools/validate")
+def validate_factory_tool(body: dict, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.manage")
+    from app.tool_factory.models import ToolDefinition
+    from app.tool_factory.validation import validate_tool_definition
+    definition = ToolDefinition(
+        name=body.get("name", ""), display_name=body.get("display_name", "") or body.get("name", ""),
+        description=body.get("description", ""), category=body.get("category", "general"),
+        version=body.get("version", "1.0.0"), author=user_id,
+        input_schema=body.get("input_schema", {}), output_schema=body.get("output_schema", {}),
+        execution_mode=body.get("execution_mode", "both"), command_template=body.get("command_template", ""),
+        allowed_paths=body.get("allowed_paths", []), timeout_seconds=body.get("timeout_seconds", 10),
+        max_output_bytes=body.get("max_output_bytes", 16384),
+        required_permission=body.get("required_permission", "tools.execute"),
+        read_only=body.get("read_only", True),
+    )
+    issues = validate_tool_definition(definition)
+    return {"valid": not issues, "errors": [issue.to_dict() for issue in issues]}
+
+
+@app.post("/api/tools")
+def create_factory_tool(body: dict, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.manage")
+    from app.tool_factory.service import get_tool_factory_service, ToolValidationError
+    service = get_tool_factory_service()
+    try:
+        definition = service.create_tool(context.organization.id, body, actor=user_id)
+        return {"success": True, "tool": definition.to_public()}
+    except ToolValidationError as exc:
+        return JSONResponse(status_code=400, content={"success": False, "errors": [issue.to_dict() for issue in exc.issues]})
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/tools/{name}")
+def get_factory_tool(name: str, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.read")
+    from app.tool_factory.service import get_tool_factory_service
+    service = get_tool_factory_service()
+    try:
+        definition = service.get_tool(context.organization.id, name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    active = service.repository.get_active_version(context.organization.id, name)
+    return {"success": True, "tool": definition.to_public(), "active_version": active.version if active else None}
+
+
+@app.get("/api/tools/{name}/versions")
+def list_factory_tool_versions(name: str, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.read")
+    from app.tool_factory.service import get_tool_factory_service
+    from app.tool_factory.repository import dump_public
+    service = get_tool_factory_service()
+    try:
+        versions = service.list_tool_versions(context.organization.id, name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"success": True, "versions": [dump_public(version) for version in versions]}
+
+
+@app.post("/api/tools/{name}/activate")
+def activate_factory_tool(name: str, body: dict, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.manage")
+    from app.tool_factory.service import get_tool_factory_service
+    service = get_tool_factory_service()
+    try:
+        result = service.activate_tool_version(context.organization.id, name, body.get("version", ""), actor=user_id, reason=body.get("reason", ""))
+        return {"success": True, **result}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except (PermissionError, ValueError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/tools/{name}/deactivate")
+def deactivate_factory_tool(name: str, body: dict, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.manage")
+    from app.tool_factory.service import get_tool_factory_service
+    service = get_tool_factory_service()
+    try:
+        result = service.deactivate_tool_version(context.organization.id, name, actor=user_id, reason=body.get("reason", ""))
+        return {"success": True, **result}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/tools/{name}/rollback")
+def rollback_factory_tool(name: str, body: dict, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.manage")
+    from app.tool_factory.service import get_tool_factory_service
+    service = get_tool_factory_service()
+    try:
+        result = service.rollback_tool_version(context.organization.id, name, actor=user_id, reason=body.get("reason", ""))
+        return {"success": True, **result}
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/tools/{name}/execute")
+def execute_factory_tool(name: str, body: dict, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    from app.tool_factory.service import get_tool_factory_service
+    from app.tool_factory.execution import get_tool_execution_service, ToolExecutionError
+    service = get_tool_factory_service()
+    try:
+        definition = service.get_tool(context.organization.id, name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    _require_permission(context, definition.required_permission)
+    execution = get_tool_execution_service()
+    try:
+        result = execution.execute_tool(name, body.get("arguments", {}), user_id=user_id,
+                                        organization_id=context.organization.id, role_can=context.can)
+        return result
+    except ToolExecutionError as exc:
+        status_code = {"tool_not_found": 404, "permission_denied": 403}.get(exc.error_code, 400)
+        raise HTTPException(status_code=status_code, detail=str(exc))
+
+
+@app.get("/api/tools/{name}/audit")
+def factory_tool_audit(name: str, request: Request):
+    user_id, context = _tool_factory_identity(request)
+    _require_permission(context, "tools.manage")
+    from app.tool_factory.service import get_tool_factory_service
+    service = get_tool_factory_service()
+    try:
+        records = service.list_audit(context.organization.id, name)
+    except KeyError as exc:
+        raise HTTPException(status_code=404, detail=str(exc))
+    return {"success": True, "audits": [record.to_public() for record in records]}
+
+
+@app.get("/api/project/context")
+def project_context(project_path: str = ".", request: Request = None):
+    username = session_user(request.cookies.get("jarvis_session"))
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from app.project_intelligence import analyze_project
+    try:
+        result = analyze_project(project_path, mode="overview")
+        return {"success": True, "context": result}
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.post("/api/project/scan")
+def project_scan(body: dict, request: Request):
+    username = session_user(request.cookies.get("jarvis_session"))
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from app.project_intelligence import analyze_project, correlate
+    path = body.get("project_path", ".")
+    try:
+        result = analyze_project(path, mode=body.get("mode", "overview"))
+        if body.get("error_message") or body.get("container_name"):
+            result["correlation"] = correlate(error_message=body.get("error_message", ""),
+                                              container_name=body.get("container_name", ""),
+                                              project_path=path)
+        return result
+    except (ValueError, PermissionError) as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+
+
+@app.get("/api/research/progress")
+def research_progress(request: Request):
+    username = session_user(request.cookies.get("jarvis_session"))
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from app.research import list_research_progress
+    return list_research_progress()
+
+
+@app.get("/api/research/disagreements")
+def research_disagreements(request: Request):
+    username = session_user(request.cookies.get("jarvis_session"))
+    if not username:
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from app.research import source_disagreement_report
+    return source_disagreement_report()
+
 
 # Terminal
 

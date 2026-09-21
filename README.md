@@ -436,3 +436,40 @@ Do not run Ollama, Qdrant, MySQL, Redis, Whisper, Kokoro, Docker/K3s, and a larg
 ## Future production hardening
 
 Before any public or customer-facing deployment, complete persistent PostgreSQL-backed users/RBAC, Redis-backed dispatch where needed, TLS/mTLS, secret manager/KMS, token rotation, rate limiting, audit retention, backup/recovery, worker sandboxing, signed updates, centralized observability, and a reviewed deployment model.
+
+## Tool Factory (read-only generated tools)
+
+The Tool Factory (`app/tool_factory/`) is a controlled pipeline for creating, versioning, and executing **read-only** DevOps tools from structured definitions. It does not replace the existing tool registry, the SSH whitelist, or the Phase 5 control pipeline — it plugs into them.
+
+### Security model
+
+- Generated tools are **read-only by default** and can never execute arbitrary shell.
+- Command templates may not contain shell metacharacters (`;`, `|`, `&`, `$`, backticks, redirects) or dangerous binaries (`rm`, `docker exec/rm/kill/system prune`, `kubectl delete/apply/exec`, `systemctl stop`, `sudo`, `curl|bash`, `wget|bash`, package installers, etc.).
+- Every execution passes: RBAC permission check → input JSON-schema validation → safe placeholder substitution → **SSH whitelist final gate** → unified executor (local or SSH mode) → timeout, output truncation, and secret redaction → audit record.
+- Secrets in output are redacted (values removed, key names preserved); `.env` and credential files are never returned by remote search.
+- Mutating operations (container start/stop/restart) remain outside the Tool Factory and inside the existing Phase 5 policy → risk → approval → execution → verification flow.
+- Lifecycle is governance-gated: definitions must be validated and approved before activation; only one version is active at a time; activate/deactivate/rollback are audited and require the `tools.manage` permission (admins).
+
+### Remote search
+
+`app/tool_factory/remote_search.py` provides bounded, redacted search over **server-configured roots only** (`JARVIS_SEARCH_ALLOWED_ROOTS`, comma-separated absolute paths; traversal segments are refused). Supported read-only commands (grep with max matches, find at bounded depth, tail with bounded lines) are registered into the SSH whitelist at startup from server config — the browser/LLM can only pick a root and fill safe slots, never supply raw commands.
+
+### Project intelligence correlation
+
+`app/project_intelligence.py` gained a correlation pass that links error messages with container names, Compose services, project folders, and dependency/config files, returning confidence and evidence paths. Current live evidence always outranks historical memory.
+
+### Research progress & memory
+
+`app/research.py` tracks learned skills (topic, detected version, source, confidence, safety notes, refresh timestamp), supports refresh and version comparison, reports source disagreement, and persists learned skills into Phase 4 memory. Research findings are advisory only and never executed automatically.
+
+### API and UI
+
+New authenticated endpoints (see `/docs`): `/api/tools` (list/create/validate/activate/deactivate/rollback/execute/audit/versions) plus `/api/project/context`, `/api/project/scan`, and `/api/research/{refresh,progress,disagreements}`. Write operations require admin/`tools.manage`; viewers are read-only. The frontend "Tools & Automation" settings section exposes the same capabilities.
+
+### Configuration
+
+```
+JARVIS_SEARCH_ALLOWED_ROOTS=/var/www,/etc/nginx
+```
+
+Optional; empty means remote search is disabled. Tool Factory storage follows the existing database opt-in: `DATABASE_ENABLED=true` + `DATABASE_URL` use PostgreSQL (migration `db/migrations/002_tool_factory.sql`); otherwise an in-memory repository is used.

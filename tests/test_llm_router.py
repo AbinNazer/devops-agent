@@ -22,6 +22,29 @@ from app.llm_router import (
 # ── Helpers ──
 
 
+class _reload_config_preserving_identity:
+    """Reload app.config without forking module identity.
+
+    importlib.reload(app.config) creates a NEW Config class object. Modules
+    that imported Config at import time keep the old class while call-time
+    imports get the new one — which silently bypasses any monkeypatch on the
+    old class and re-reads real environment values. This helper snapshots the
+    module contents and restores them exactly, so ``config.Config`` remains
+    the same object for every importer.
+    """
+
+    def __enter__(self):
+        import app.config as config
+        self._module = config
+        self._snapshot = dict(vars(config))
+        return config
+
+    def __exit__(self, exc_type, exc, tb):
+        self._module.__dict__.clear()
+        self._module.__dict__.update(self._snapshot)
+        return False
+
+
 class MockProvider(LLMProvider):
     """Deterministic mock provider for testing."""
 
@@ -383,26 +406,32 @@ class TestEnvPreservation:
         import importlib
         import app.config as config
 
+        original = config.Config
         monkeypatch.delenv("OLLAMA_MODEL", raising=False)
 
-        with patch("dotenv.load_dotenv", return_value=None):
-            importlib.reload(config)
-            assert config.Config.OLLAMA_HOST == "http://localhost:11434"
-            assert config.Config.OLLAMA_MODEL == "qwen2.5:7b"
+        with _reload_config_preserving_identity() as cfg:
+            with patch("dotenv.load_dotenv", return_value=None):
+                importlib.reload(cfg)
+                assert cfg.Config.OLLAMA_HOST == "http://localhost:11434"
+                assert cfg.Config.OLLAMA_MODEL == "qwen2.5:7b"
 
-        importlib.reload(config)
+        # Class identity preserved — no fork for call-time importers.
+        assert config.Config is original
 
     def test_openai_defaults(self, monkeypatch):
         import importlib
         import app.config as config
 
+        original = config.Config
         monkeypatch.delenv("OPENAI_MODEL", raising=False)
 
-        with patch("dotenv.load_dotenv", return_value=None):
-            importlib.reload(config)
-            assert config.Config.OPENAI_MODEL == "gpt-4o"
+        with _reload_config_preserving_identity() as cfg:
+            with patch("dotenv.load_dotenv", return_value=None):
+                importlib.reload(cfg)
+                assert cfg.Config.OPENAI_MODEL == "gpt-4o"
 
-        importlib.reload(config)
+        # Class identity preserved — no fork for call-time importers.
+        assert config.Config is original
 
     def test_anthropic_defaults(self):
         from app.config import Config

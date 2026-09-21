@@ -51,6 +51,8 @@ class RiskAssessment:
 
 # Risk profiles for known action types
 _ACTION_RISK_PROFILES = {
+    "start_container": {"severity": 0.4, "blast_radius": 0.3, "reversibility": 0.8, "production_impact": 0.4, "destructive_potential": 0.1},
+    "stop_container": {"severity": 0.6, "blast_radius": 0.4, "reversibility": 0.8, "production_impact": 0.6, "destructive_potential": 0.2},
     "restart_container": {
         "severity": 0.4,
         "blast_radius": 0.3,
@@ -186,7 +188,7 @@ def assess_risk(action_type: str, target: str = "", context: Optional[Dict] = No
         risk_level = RiskLevel.LOW.value
 
     reversible = reversibility >= 0.5
-    rollback_available = reversible and action_type in ("restart_container", "restart_service")
+    rollback_available = reversible and action_type in ("start_container", "stop_container", "restart_container", "restart_service")
 
     explanation_parts = []
     if risk_level == RiskLevel.CRITICAL.value:

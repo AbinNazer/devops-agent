@@ -323,9 +323,10 @@ class ControlLoop:
         # hypothesis first. It still goes through the complete safety pipeline
         # below: risk assessment, approval, execution, and verification.
         request_lower = state.request.lower()
-        restart_requested = bool(re.search(r"\b(restart|reboot)\b", request_lower))
+        lifecycle = re.search(r"\b(start|stop|restart|reboot)\b", request_lower)
+        lifecycle_requested = bool(lifecycle)
         direct_target = (state.target or "").strip()
-        if not direct_target and restart_requested:
+        if not direct_target and lifecycle_requested:
             match = re.search(
                 r"\b(?:container|service)\s+([a-zA-Z0-9][a-zA-Z0-9_.-]*)\b",
                 state.request,
@@ -334,8 +335,11 @@ class ControlLoop:
             if match:
                 direct_target = match.group(1)
 
-        if restart_requested and direct_target:
-            action_type = "restart_service" if re.search(r"\bservice\b", request_lower) else "restart_container"
+        if lifecycle_requested and direct_target:
+            verb = lifecycle.group(1)
+            action_type = ("restart_service" if verb == "reboot" and re.search(r"\bservice\b", request_lower)
+                           else "restart_container" if verb in {"restart", "reboot"}
+                           else f"{verb}_container")
             targets = [item.strip() for item in re.split(r",|\band\b", direct_target, flags=re.IGNORECASE) if item.strip()]
             state.action_plan = [{
                 "action_type": action_type,

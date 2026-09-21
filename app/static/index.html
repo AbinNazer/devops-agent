@@ -109,6 +109,7 @@
             <button class="settings-nav-item" data-settings-section="infrastructure" type="button">Configure infrastructure</button>
             <button class="settings-nav-item" data-settings-section="providers" type="button">AI providers</button>
             <button class="settings-nav-item" data-settings-section="research" type="button">Web research & skills</button>
+            <button class="settings-nav-item" data-settings-section="tools" type="button">Tools &amp; Automation</button>
           </nav>
           <div class="settings-content">
             <div class="settings-grid" data-settings-section-content="general">
@@ -190,6 +191,22 @@
               </form>
               <p id="research-status" class="settings-status" role="status"></p>
               <div id="research-results" class="research-results"></div>
+            </div>
+            <div class="settings-section" data-settings-section-content="tools" hidden>
+              <div class="settings-section-heading">
+                <span class="eyebrow">GOVERNED AUTOMATION</span>
+                <h3>Tool Factory</h3>
+                <p>Read-only tools with validated commands, version history, and execution audits. Activate/deactivate requires admin rights; generated tools can never run arbitrary shell.</p>
+              </div>
+              <div class="tools-toolbar">
+                <button id="tools-refresh" class="small-button" type="button">Refresh tools</button>
+                <button id="project-scan" class="small-button" type="button">Scan project context</button>
+                <button id="research-progress" class="small-button" type="button">Research progress</button>
+                <button id="research-disagreements" class="small-button" type="button">Source disagreements</button>
+              </div>
+              <p id="tools-status" class="settings-status" role="status"></p>
+              <div id="tools-list" class="tools-list">Loading tools…</div>
+              <div id="tools-detail" class="tools-detail" hidden></div>
             </div>
           </div>
         </div>

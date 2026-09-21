@@ -143,6 +143,127 @@ def inspect_existing_infrastructure(tool: str) -> dict:
     return {"tool": tool, "status": "no_existing_read_only_inspector"}
 
 
+# ── Research progress / disagreement / compatibility (memory-integrated) ──
+
+
+def _skill_slug(name: str) -> str:
+    return re.sub(r"[^a-z0-9]+", "-", name.lower()).strip("-")[:60]
+
+
+def _read_skill_cache(slug: str) -> dict:
+    cache_path = RESEARCH_CACHE_DIR / f"{slug}.json"
+    if not cache_path.exists():
+        return {}
+    try:
+        return json.loads(cache_path.read_text(encoding="utf-8"))
+    except (OSError, json.JSONDecodeError):
+        return {}
+
+
+def list_research_progress() -> dict:
+    """Summarize every researched skill: status, versions, source health."""
+    skills = []
+    if SKILLS_DIR.exists():
+        for skill_dir in sorted(SKILLS_DIR.iterdir()):
+            if not skill_dir.is_dir() or skill_dir.name.startswith("."):
+                continue
+            profile = skill_dir / "SKILL.md"
+            if not profile.exists():
+                continue
+            cache = _read_skill_cache(skill_dir.name)
+            comparison = (cache.get("source_comparison") or {})
+            skills.append({
+                "skill": skill_dir.name,
+                "researched_at": cache.get("researched_at", ""),
+                "detected_version": (cache.get("local_version") or {}).get("version", ""),
+                "requested_version": cache.get("version", ""),
+                "sources": len(cache.get("sources", [])),
+                "source_comparison": comparison.get("status", "unknown"),
+                "status": "researched",
+            })
+    return {"success": True, "count": len(skills), "skills": skills}
+
+
+def source_disagreement_report() -> dict:
+    """List skills whose sources disagree or need human review."""
+    disagreements = []
+    if SKILLS_DIR.exists():
+        for skill_dir in sorted(SKILLS_DIR.iterdir()):
+            if not skill_dir.is_dir() or skill_dir.name.startswith("."):
+                continue
+            cache = _read_skill_cache(skill_dir.name)
+            comparison = cache.get("source_comparison") or {}
+            status = comparison.get("status", "")
+            if status in {"needs_review", "insufficient_sources", "partially_agreeing"}:
+                disagreements.append({
+                    "skill": skill_dir.name,
+                    "status": status,
+                    "sources_compared": comparison.get("sources_compared", 0),
+                    "recommendation": "verify against official documentation before relying on this profile",
+                })
+    return {"success": True, "count": len(disagreements), "disagreements": disagreements}
+
+
+def project_compatibility_report(tool: str) -> dict:
+    """Compare requested/documented version against local detected evidence."""
+    slug = _skill_slug(tool)
+    cache = _read_skill_cache(slug)
+    if not cache:
+        return {"success": False, "error": f"no research profile for '{tool}'; run learn_tool first"}
+    local = cache.get("local_version") or {}
+    detected = (local.get("version") or "")
+    requested = cache.get("version") or ""
+    local_status = local.get("status", "unknown")
+    return {
+        "success": True,
+        "tool": tool,
+        "requested_version": requested,
+        "detected_version": detected,
+        "local_status": local_status,
+        "project_matches": (cache.get("project") or {}).get("status", "unknown"),
+        "note": "Local detected evidence outranks documented claims; verify upgrades against the linked sources.",
+    }
+
+
+def remember_skill(tool: str, memory_repository=None) -> dict:
+    """Store a researched skill into Phase 4 semantic memory.
+
+    Knowledge only — the memory record carries sources and safety notes,
+    never execution permission. Uses the shared MemoryRepository when
+    provided; safe no-op with structured result when memory is unavailable.
+    """
+    slug = _skill_slug(tool)
+    cache = _read_skill_cache(slug)
+    if not cache:
+        return {"success": False, "error": f"no research profile for '{tool}'"}
+    title = f"Research: {cache.get('tool', tool)}"
+    sources = cache.get("sources") or []
+    source_lines = "\n".join(f"- {item.get('title', '')} ({item.get('url', '')})" for item in sources[:5])
+    content = (
+        f"Researched tool profile. Version evidence: {cache.get('version', 'unknown')}. "
+        f"Local status: {(cache.get('local_version') or {}).get('status', 'unknown')}. "
+        f"Source comparison: {(cache.get('source_comparison') or {}).get('status', 'unknown')}. "
+        f"Commands from research are references only and require normal approval.\nSources:\n{source_lines}"
+    )
+    if memory_repository is None:
+        try:
+            from app.tool_registry import memory_repo as memory_repository
+        except Exception:
+            return {"success": False, "error": "memory repository unavailable"}
+    try:
+        from app.memory.models import Memory
+        memory = Memory(
+            title=title[:120], content=content[:4000], type="semantic",
+            environment="research", component=cache.get("tool", tool)[:60],
+            source="research",
+        )
+        memory_repository.store_memory(memory)
+        return {"success": True, "memory_id": memory.id, "skill": slug}
+    except Exception as exc:
+        logger.warning("skill_memory_store_failed tool=%r error=%s", tool, exc)
+        return {"success": False, "error": "could not store research in memory"}
+
+
 def learn_tool(tool: str, refresh: bool = False, version: str = "") -> dict:
     """Create/update a source-tracked, non-executable tool knowledge profile."""
     name = (tool or "").strip()

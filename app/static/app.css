@@ -646,6 +646,40 @@ html[data-boot="app"] .app-shell { display: flex !important; }
   font-size: 10px;
   white-space: nowrap;
 }
+.status-badge.ok { color: var(--ok, #35c98e); border-color: color-mix(in srgb, var(--ok, #35c98e) 50%, transparent); }
+.status-badge.bad { color: var(--danger, #e5534b); border-color: color-mix(in srgb, var(--danger, #e5534b) 50%, transparent); }
+.status-badge.idle { color: var(--muted); }
+.tools-toolbar { display: flex; flex-wrap: wrap; gap: 8px; margin-bottom: 12px; }
+.tools-list { display: grid; gap: 10px; }
+.tool-card {
+  display: grid;
+  gap: 6px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--bg);
+  font-size: 12px;
+}
+.tool-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.tool-meta { display: flex; flex-wrap: wrap; gap: 10px; color: var(--muted); font-size: 11px; }
+.tool-actions { display: flex; gap: 8px; }
+.tool-actions button {
+  padding: 5px 10px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text);
+  font-size: 11px;
+  cursor: pointer;
+}
+.tool-actions button:hover { border-color: var(--accent); color: var(--accent); }
+.tools-detail { margin-top: 14px; display: grid; gap: 10px; }
+.tool-versions { display: grid; gap: 4px; font-size: 11px; color: var(--muted); }
+.tool-versions em { color: var(--text); font-style: normal; margin-bottom: 2px; }
+.tool-version-row { display: flex; gap: 14px; flex-wrap: wrap; }
+.tool-version-row .ok { color: var(--ok, #35c98e); }
+.tool-version-row .bad { color: var(--danger, #e5534b); }
+.muted { color: var(--muted); }
 .target-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));

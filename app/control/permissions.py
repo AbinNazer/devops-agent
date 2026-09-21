@@ -92,7 +92,7 @@ def evaluate_approval(request: ApprovalRequest) -> Dict:
     # Restarts mutate infrastructure even when the calculated risk is low.
     # Never auto-approve a write action; the operator must explicitly confirm
     # it in the CLI or through a future web approval flow.
-    if request.action_type in {"restart_container", "restart_service"}:
+    if request.action_type in {"start_container", "stop_container", "restart_container", "restart_service"}:
         requirement = "ask"
     else:
         requirement = determine_approval_requirement(request.risk_level)

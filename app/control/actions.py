@@ -22,12 +22,22 @@ from app.control.policy import (
     evaluate_action, build_safe_command, validate_target_name,
     is_action_allowed, ActionRequest,
 )
-from app.ssh_whitelist import is_command_allowed
-from app.ssh_client import run_whitelisted_command
+from app.ssh_whitelist import is_action_command_allowed
+from app.executor import run_action_command
 
 
 # Configurable allowed actions — only these can be executed
 CONFIGURABLE_ALLOWED_ACTIONS = {
+    "start_container": {
+        "description": "Start a stopped Docker container",
+        "command_template": "docker start {target}",
+        "reversible": True, "requires_approval": True,
+    },
+    "stop_container": {
+        "description": "Stop a running Docker container",
+        "command_template": "docker stop {target}",
+        "reversible": True, "requires_approval": True,
+    },
     "restart_container": {
         "description": "Restart a Docker container",
         "command_template": "docker restart {target}",
@@ -62,7 +72,7 @@ def build_action_command(action_type: str, target: str) -> Optional[str]:
         return None
     command = action_config["command_template"].format(target=target)
     # Verify it passes the SSH whitelist
-    if not is_command_allowed(command):
+    if not is_action_command_allowed(command):
         return None
     return command
 
@@ -93,7 +103,7 @@ def execute_action(action_type: str, target: str) -> Dict:
         }
 
     # Step 3: Execute through SSH (whitelist is enforced inside run_whitelisted_command)
-    result = run_whitelisted_command(command)
+    result = run_action_command(command)
 
     if result["success"]:
         return {

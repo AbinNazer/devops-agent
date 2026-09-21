@@ -12,7 +12,12 @@ for every tool, automatically.
 from app.tools.server import (
     get_cpu_usage, get_memory_usage, get_disk_usage, get_uptime, get_service_status,
 )
-from app.tools.docker import docker_status, docker_logs, docker_inspect, docker_stats, docker_health_status
+from app.tools.docker import (
+    docker_status, docker_logs, docker_inspect, docker_stats, docker_health_status,
+    docker_start_container, docker_stop_container, docker_restart_container, resolve_container_name,
+    docker_image_usage,
+)
+from app.tools.grep import grep_search
 from app.tools.network import check_network_connectivity
 from app.tools.process import list_top_processes
 from app.tools.jenkins import get_jenkins_status, get_jenkins_stats, get_jenkins_logs
@@ -244,6 +249,9 @@ TOOL_SCHEMAS = [
             },
         },
     },
+    {"type": "function", "function": {"name": "docker_image_usage", "description": "Read-only report of Docker images, container references, dangling images, and unused images.", "parameters": {"type": "object", "properties": {}}}},
+    {"type": "function", "function": {"name": "resolve_container_name", "description": "Resolve an approximate Docker container name to an exact name using a read-only lookup.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}}, "required": ["query"]}}},
+    {"type": "function", "function": {"name": "grep_search", "description": "Bounded read-only search across an authorized local project directory. Secrets and binary files are skipped and results are redacted.", "parameters": {"type": "object", "properties": {"query": {"type": "string"}, "path": {"type": "string"}, "file_pattern": {"type": "string"}, "context_lines": {"type": "integer"}, "max_results": {"type": "integer"}, "regex": {"type": "boolean"}}, "required": ["query"]}}},
     # --- Jenkins ---
     {
         "type": "function",
@@ -529,6 +537,24 @@ TOOL_SCHEMAS = [
     {
         "type": "function",
         "function": {
+            "name": "remote_search",
+            "description": "Read-only bounded search (grep), listing (find), or tail under a server-configured allowed root (JARVIS_SEARCH_ALLOWED_ROOTS). Secrets are redacted; arbitrary paths and .env/key files are refused.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "operation": {"type": "string", "enum": ["search", "list", "tail"], "description": "search=grep, list=find files, tail=last lines of a file"},
+                    "query": {"type": "string", "description": "Search term (search operation only)"},
+                    "root": {"type": "string", "description": "One of the configured allowed roots, e.g. /var/www"},
+                    "path": {"type": "string", "description": "Root-relative path (optional for search/list; required for tail)"},
+                    "lines": {"type": "integer", "description": "tail line count, default 100, max 500"}
+                },
+                "required": ["operation", "root"]
+            },
+        },
+    },
+    {
+        "type": "function",
+        "function": {
             "name": "get_monitoring_summary",
             "description": "Return a summary of overall monitoring health: collector status, active incidents by severity, total anomalies. Read-only.",
             "parameters": {"type": "object", "properties": {}}
@@ -568,6 +594,9 @@ _DISPATCH = {
     "docker_stats": lambda args: docker_stats(),
     "docker_logs": lambda args: docker_logs(args.get("container_name"), args.get("lines", 50)),
     "docker_inspect": lambda args: docker_inspect(args.get("container_name")),
+    "docker_image_usage": lambda args: docker_image_usage(),
+    "resolve_container_name": lambda args: resolve_container_name(args.get("query", "")),
+    "grep_search": lambda args: grep_search(args.get("query", ""), args.get("path", "."), args.get("file_pattern", ""), args.get("context_lines", 0), args.get("max_results", 100), args.get("regex", False)),
     "get_jenkins_status": lambda args: get_jenkins_status(),
     "get_jenkins_stats": lambda args: get_jenkins_stats(),
     "get_jenkins_logs": lambda args: get_jenkins_logs(args.get("lines", 50)),
@@ -631,7 +660,7 @@ def run_diagnostic(args):
     mode = args.get("mode")
     if not mode:
         mode = "immediate" if any(
-            word in request.lower().split() for word in ("restart", "reboot")
+            word in request.lower().split() for word in ("start", "stop", "restart", "reboot")
         ) else "diagnostic"
     result = controller.run(
         request=request,
@@ -709,6 +738,26 @@ def explain_anomaly(args):
     return {"success": True, "anomaly_type": atype, "explanation": explanation, "note": "This is based on the actual implemented detection logic. Thresholds are configurable."}
 
 _DISPATCH["explain_anomaly"] = explain_anomaly
+
+
+# ── Tool Factory + remote search (Phase: governed tools) ────────────────
+
+def remote_search_tool(args):
+    """Dispatch bounded remote search/list/tail operations."""
+    from app.tool_factory import remote_search as rs
+    operation = args.get("operation", "search")
+    root = args.get("root", "")
+    path = args.get("path", "")
+    if operation == "search":
+        return rs.remote_search(args.get("query", ""), root, path)
+    if operation == "list":
+        return rs.remote_list(root, path)
+    if operation == "tail":
+        return rs.remote_tail(root, path, args.get("lines", 100))
+    return {"success": False, "error": f"Unknown operation: '{operation}'"}
+
+
+_DISPATCH["remote_search"] = remote_search_tool
 
 # Phase 6: monitoring engine (lazy-initialized, shared)
 _monitoring_engine = None

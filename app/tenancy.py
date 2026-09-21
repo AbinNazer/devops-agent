@@ -19,9 +19,9 @@ class Role(str, Enum):
 
 ROLE_PERMISSIONS: dict[Role, frozenset[str]] = {
     Role.OWNER: frozenset({"*"}),
-    Role.ADMIN: frozenset({"infrastructure.read", "infrastructure.manage", "terminal.access", "terminal.admin", "incident.manage", "settings.manage", "team.manage"}),
-    Role.ENGINEER: frozenset({"infrastructure.read", "terminal.access", "incident.manage"}),
-    Role.VIEWER: frozenset({"infrastructure.read"}),
+    Role.ADMIN: frozenset({"infrastructure.read", "infrastructure.manage", "terminal.access", "terminal.admin", "incident.manage", "settings.manage", "team.manage", "tools.read", "tools.manage", "tools.execute"}),
+    Role.ENGINEER: frozenset({"infrastructure.read", "terminal.access", "incident.manage", "tools.read", "tools.execute"}),
+    Role.VIEWER: frozenset({"infrastructure.read", "tools.read"}),
 }
 
 

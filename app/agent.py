@@ -46,8 +46,8 @@ confidently, say so explicitly rather than guessing.
 
 Phase 5 ground truth — only describe capabilities that are actually \
 implemented. Never invent implementation details:
-- Allowed actions: ONLY restart_container (docker restart) and \
-restart_service (systemctl restart). Nothing else.
+- Allowed actions: start_container, stop_container, restart_container \
+(Docker lifecycle) and restart_service, through run_diagnostic only.
 - Rollback for restart actions: the system restarts the container/service \
 again. It does NOT stop/recreate containers, does NOT use docker run, \
 cannot restore previous Docker configuration, and has no stored snapshots \
@@ -167,13 +167,17 @@ class Agent:
                 return content
 
             runnable = []
+            # (tool_call, preset_result) in original call order. preset_result is
+            # set for duplicates/validation rejections; None means "execute".
+            # Results must reach history in the same order as the assistant's
+            # tool_calls — providers require tool result messages to follow the
+            # assistant message in call order.
+            pending = []
             for tc in tool_calls:
                 tc_sig = (tc["name"], str(tc.get("arguments", {})))
                 if tc_sig in called_tools:
                     logger.warning("tool_duplicate_skipped=%s", tc["name"])
-                    history.append(self.provider.tool_result_message(
-                        tc, {"success": False, "error": "Duplicate tool call detected and skipped to prevent looping."}
-                    ))
+                    pending.append((tc, {"success": False, "error": "Duplicate tool call detected and skipped to prevent looping."}))
                     continue
                 called_tools.add(tc_sig)
 
@@ -183,16 +187,16 @@ class Agent:
                 if (self.allowed_tool_names is not None
                         and tc["name"] not in self.allowed_tool_names):
                     logger.warning("tool_not_registered=%s", tc["name"])
-                    tool_result = {
+                    pending.append((tc, {
                         "success": False,
                         "error": (
                             f"'{tc['name']}' is not a registered tool. "
                             f"Available tools: {sorted(self.allowed_tool_names)}"
                         ),
-                    }
-                    history.append(self.provider.tool_result_message(tc, tool_result))
+                    }))
                     continue
 
+                pending.append((tc, None))
                 runnable.append(tc)
 
             def execute_one(tc):
@@ -225,7 +229,10 @@ class Agent:
             else:
                 results = [execute_one(tc) for tc in runnable]
 
-            for tc, tool_result in zip(runnable, results):
+            # Merge executed results back into call order, then append to history.
+            executed_iter = iter(zip(runnable, results))
+            for tc, preset in pending:
+                tool_result = preset if preset is not None else next(executed_iter)[1]
                 if tool_result.get("success") is False:
                     logger.warning("tool_failed=%s error=%s", tc["name"], tool_result.get("error"))
                 else:

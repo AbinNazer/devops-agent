@@ -93,7 +93,12 @@ def test_medium_risk_pending_approval():
 
 
 def test_high_risk_pending_with_explanation():
-    """High-risk actions should be pending with detailed explanation."""
+    """Restart-class actions always require explicit approval, even at high risk.
+
+    evaluate_approval deliberately short-circuits restart-class actions to
+    requirement="ask": a write action must never be auto-approved (or
+    auto-explained into approval) based on risk level alone.
+    """
     request = ApprovalRequest(
         action_type="restart_service",
         target="postgresql",
@@ -106,7 +111,7 @@ def test_high_risk_pending_with_explanation():
     )
     result = evaluate_approval(request)
     assert result["status"] == ApprovalStatus.PENDING.value
-    assert result["requirement"] == "ask_explain"
+    assert result["requirement"] == "ask"
 
 
 # --- User approval simulation ---

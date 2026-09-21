@@ -71,7 +71,7 @@ def test_execute_action_restart_container():
     """Executing a restart_container should call SSH with the right command."""
     mock_result = {"success": True, "command": "docker restart backend",
                    "stdout": "", "stderr": "", "exit_code": 0}
-    with patch("app.control.actions.run_whitelisted_command", return_value=mock_result):
+    with patch("app.control.actions.run_action_command", return_value=mock_result):
         result = execute_action("restart_container", "backend")
 
     assert result["success"] is True
@@ -84,7 +84,7 @@ def test_execute_action_restart_service():
     """Executing a restart_service should call SSH with the right command."""
     mock_result = {"success": True, "command": "systemctl restart nginx",
                    "stdout": "", "stderr": "", "exit_code": 0}
-    with patch("app.control.actions.run_whitelisted_command", return_value=mock_result):
+    with patch("app.control.actions.run_action_command", return_value=mock_result):
         result = execute_action("restart_service", "nginx")
 
     assert result["success"] is True
@@ -93,7 +93,7 @@ def test_execute_action_restart_service():
 
 def test_execute_action_rejects_disallowed_action():
     """Executing a disallowed action should fail without SSH."""
-    with patch("app.control.actions.run_whitelisted_command") as mock_ssh:
+    with patch("app.control.actions.run_action_command") as mock_ssh:
         result = execute_action("rm", "everything")
 
     assert result["success"] is False
@@ -103,7 +103,7 @@ def test_execute_action_rejects_disallowed_action():
 
 def test_execute_action_rejects_unsafe_target():
     """Executing with an unsafe target should fail without SSH."""
-    with patch("app.control.actions.run_whitelisted_command") as mock_ssh:
+    with patch("app.control.actions.run_action_command") as mock_ssh:
         result = execute_action("restart_container", "backend; rm -rf /")
 
     assert result["success"] is False
@@ -113,7 +113,7 @@ def test_execute_action_rejects_unsafe_target():
 def test_execute_action_handles_ssh_failure():
     """SSH failure should be properly reported."""
     mock_result = {"success": False, "error": "Connection refused"}
-    with patch("app.control.actions.run_whitelisted_command", return_value=mock_result):
+    with patch("app.control.actions.run_action_command", return_value=mock_result):
         result = execute_action("restart_container", "backend")
 
     assert result["success"] is False
@@ -123,7 +123,7 @@ def test_execute_action_handles_ssh_failure():
 def test_execute_action_rejects_nonexistent_container():
     """SSH failure for non-existent container should be reported."""
     mock_result = {"success": False, "error": "No such container: ghost"}
-    with patch("app.control.actions.run_whitelisted_command", return_value=mock_result):
+    with patch("app.control.actions.run_action_command", return_value=mock_result):
         result = execute_action("restart_container", "ghost")
 
     assert result["success"] is False
@@ -150,7 +150,7 @@ def test_actions_always_pass_through_whitelist():
     """Every action command must pass through the SSH whitelist."""
     # Even if somehow an unsafe command got through, the whitelist rejects it
     mock_result = {"success": False, "error": "Command not permitted"}
-    with patch("app.control.actions.run_whitelisted_command", return_value=mock_result):
+    with patch("app.control.actions.run_action_command", return_value=mock_result):
         with patch("app.control.actions.build_action_command", return_value="rm -rf /"):
             with patch("app.control.actions.is_action_executable", return_value=True):
                 with patch("app.control.actions.validate_target_name", return_value=True):

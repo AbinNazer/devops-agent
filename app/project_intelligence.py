@@ -183,6 +183,103 @@ def analyze_project(project_path: str | Path = ".", mode: str = "full", specific
     return result
 
 
+# ── Correlation: errors ↔ containers ↔ projects ─────────────────────
+
+_CONTAINER_HINT_RE = re.compile(
+    r"(?:container|service)\s+[\"']?([a-z0-9][\w.\-]{1,63})[\"']?", re.I)
+
+
+def correlate(error_message: str = "", container_name: str = "", project_path: str | Path = ".",
+              max_files: int = 40) -> dict:
+    """Correlate an error message with containers, services, projects, and source files.
+
+    Read-only and evidence-based: every returned link carries the file path
+    that justified it and a confidence score derived from the strength of the
+    match. Never executes project code; never exposes secret values.
+    """
+    error_message = (error_message or "").strip()
+    container_name = (container_name or "").strip()
+    if not error_message and not container_name:
+        return {"success": False, "error": "provide an error_message or container_name"}
+
+    evidence: list[dict] = []
+    # Container hints inside the error text itself.
+    hinted_containers = sorted({match.group(1).lower() for match in _CONTAINER_HINT_RE.finditer(error_message)})
+
+    # Compose/service detection from deployment files in the project.
+    compose_services: list[str] = []
+    compose_files: list[str] = []
+    try:
+        root = _safe_path(project_path)
+    except (ValueError, PermissionError) as exc:
+        return {"success": False, "error": str(exc)}
+    for path in _files(root, limit=400):
+        name = path.name.lower()
+        if "docker-compose" in name or name == "compose.yaml":
+            text = _read(path)
+            compose_files.append(str(path.relative_to(root)))
+            for service_match in re.finditer(r"^\s{2}([\w\-]+):\s*$", text, re.M):
+                compose_services.append(service_match.group(1).lower())
+    compose_services = sorted(set(compose_services))
+
+    # Source files that reference the container/service or reproduce the error string.
+    needle = (container_name or (hinted_containers[0] if hinted_containers else "")).lower()
+    compact_needle = "".join(ch for ch in needle if ch.isalnum())
+    source_matches: list[dict] = []
+    error_snippet = re.sub(r"\s+", " ", error_message)[:80].strip()
+    if error_snippet:
+        error_snippet = re.escape(error_snippet[:40])
+    for path in _files(root, limit=600):
+        text = _read(path)
+        relative = str(path.relative_to(root))
+        score = 0.0
+        reasons = []
+        if needle and (needle in text.lower() or (compact_needle and compact_needle in "".join(ch for ch in text.lower() if ch.isalnum()))):
+            score += 0.5
+            reasons.append(f"references '{needle}'")
+        if error_snippet and re.search(error_snippet, text, re.I):
+            score += 0.4
+            reasons.append("contains matching error text")
+        if score > 0:
+            source_matches.append({"file": relative, "confidence": round(min(score, 0.9), 2), "evidence": reasons})
+        if len(source_matches) >= max_files:
+            break
+    source_matches.sort(key=lambda item: -item["confidence"])
+
+    # Container ↔ compose-service correlation with confidence.
+    container_links = []
+    candidates = ([container_name.lower()] if container_name else []) + hinted_containers
+    for candidate in set(candidates):
+        if candidate in compose_services:
+            container_links.append({"container": candidate, "matched_as": "compose_service",
+                                    "confidence": 0.9, "evidence": compose_files})
+        elif any(candidate in service or service in candidate for service in compose_services):
+            container_links.append({"container": candidate, "matched_as": "fuzzy_compose_service",
+                                    "confidence": 0.5, "evidence": compose_files})
+        else:
+            container_links.append({"container": candidate, "matched_as": "unlinked",
+                                    "confidence": 0.1, "evidence": []})
+
+    overall = 0.0
+    if container_links:
+        overall = max(overall, max(link["confidence"] for link in container_links))
+    if source_matches:
+        overall = max(overall, source_matches[0]["confidence"])
+
+    return {
+        "success": True,
+        "error_message": error_message[:500],
+        "container_name": container_name,
+        "hinted_containers": hinted_containers,
+        "compose_services": compose_services,
+        "compose_files": compose_files,
+        "container_links": container_links,
+        "source_matches": source_matches[:20],
+        "confidence": round(overall, 2),
+        "note": "Confidence reflects evidence strength only; current live evidence always outranks these links.",
+    }
+
+
 def _mermaid(technologies: list[dict], routes: list[dict]) -> str:
     nodes = [item["name"].replace("-", "_") for item in technologies[:10]]
     lines = ["flowchart TD"] + [f"  {node.replace(' ', '_')}[{node}]" for node in nodes]

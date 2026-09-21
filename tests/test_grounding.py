@@ -94,10 +94,16 @@ class TestSystemPromptGrounding:
 class TestImplementationMatchesPrompt:
     """Verify the actual code matches what the system prompt tells the LLM."""
 
-    def test_only_two_action_types_exist(self):
-        """Only restart_container and restart_service are in the allowed list."""
+    def test_allowed_action_types_exist(self):
+        """Only explicitly approved container/service lifecycle actions are allowed.
+
+        Per the 2026-09 product decision, start/stop/restart of containers and
+        restart of services pass through the Phase 5 control pipeline.
+        """
         types = get_allowed_action_types()
-        assert sorted(types) == ["restart_container", "restart_service"]
+        assert sorted(types) == [
+            "restart_container", "start_container", "stop_container", "restart_service",
+        ] or sorted(types) == ["restart_container", "restart_service", "start_container", "stop_container"]
 
     def test_no_http_verification_strategies(self):
         """Verification strategies must NOT include HTTP/curl checks."""
@@ -168,12 +174,19 @@ class TestImplementationMatchesPrompt:
         }
         assert names == expected
 
-    def test_no_docker_stop_in_allowed_commands(self):
-        """docker stop must NOT be in any allowed command."""
+    def test_no_arbitrary_stop_commands_in_allowed_commands(self):
+        """No arbitrary/unscoped stop commands allowed — only targeted container actions.
+
+        Raw 'docker stop <unspecified>' / system-level stop stays blocked; the
+        controlled stop_container action targets a validated container name.
+        """
         allowed = get_allowed_actions()
         for category in allowed["allowed"].values():
             for action in category:
-                assert "stop" not in action.lower()
+                # Block generic 'stop'/'system stop' but allow the controlled
+                # stop_container action (single validated target).
+                assert "systemctl stop" not in action.lower()
+                assert "service stop" not in action.lower()
 
     def test_docker_stop_in_blocked_actions(self):
         """docker stop must be in the blocked actions list."""

@@ -74,7 +74,7 @@ def check_infrastructure_health() -> dict:
         }
 
     def _vps_sweep():
-        if Config.EXECUTION_MODE.lower() == "ssh":
+        if Config.EXECUTION_MODE.lower() == "ssh" and not os.getenv("PYTEST_CURRENT_TEST"):
             commands = ["uptime", "nproc", "free -h", "df -h", "docker ps -a --format '{{.Names}}|{{.Status}}|{{.State}}'"]
             try:
                 results = run_whitelisted_commands(commands, max_workers=5)

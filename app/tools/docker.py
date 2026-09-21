@@ -3,7 +3,8 @@ Phase 2: real Docker status/logs/inspect/stats pulled over SSH from the
 configured VPS, through the whitelist enforced in app/ssh_whitelist.py.
 """
 from app.ssh_client import run_whitelisted_command, truncate
-from app.ssh_whitelist import build_docker_logs_command, build_docker_inspect_command, ValidationError
+from app.executor import run_action_command
+from app.ssh_whitelist import build_docker_logs_command, build_docker_inspect_command, validate_container_name, ValidationError
 
 
 def docker_status() -> dict:
@@ -20,6 +21,67 @@ def docker_stats() -> dict:
     if not result["success"]:
         return result
     return {"success": True, "raw": truncate(result["stdout"])}
+
+
+def resolve_container_name(query: str) -> dict:
+    """Resolve a user's approximate container name without executing anything."""
+    if not isinstance(query, str) or not query.strip():
+        return {"success": False, "error": "A container name or fragment is required."}
+    result = run_whitelisted_command("docker ps -a --format '{{.Names}}'")
+    if not result.get("success"):
+        return result
+    names = [line.strip() for line in result.get("stdout", "").splitlines() if line.strip()]
+    needle = query.strip().lower()
+    compact = lambda value: "".join(ch for ch in value.lower() if ch.isalnum())
+    exact = [name for name in names if name.lower() == needle or compact(name) == compact(needle)]
+    if len(exact) == 1:
+        return {"success": True, "match": exact[0], "candidates": exact}
+    candidates = [name for name in names if needle in name.lower() or compact(needle) in compact(name)]
+    if len(candidates) == 1:
+        return {"success": True, "match": candidates[0], "candidates": candidates}
+    return {"success": True, "match": "", "candidates": candidates[:20], "ambiguous": len(candidates) > 1}
+
+
+def _docker_action(container_name: str, action: str) -> dict:
+    try:
+        name = validate_container_name(container_name)
+    except ValidationError as exc:
+        return {"success": False, "error": str(exc)}
+    if action not in {"start", "stop", "restart"}:
+        return {"success": False, "error": "Unsupported Docker action"}
+    result = run_action_command(f"docker {action} {name}")
+    return {**result, "container": name, "action": action, "success": bool(result.get("success") and result.get("exit_code") == 0)}
+
+
+def docker_start_container(container_name: str) -> dict:
+    return _docker_action(container_name, "start")
+
+
+def docker_stop_container(container_name: str) -> dict:
+    return _docker_action(container_name, "stop")
+
+
+def docker_restart_container(container_name: str) -> dict:
+    return _docker_action(container_name, "restart")
+
+
+def docker_image_usage() -> dict:
+    result = run_whitelisted_command("docker images --format '{{.Repository}}|{{.Tag}}|{{.ID}}|{{.Size}}|{{.CreatedAt}}'")
+    if not result.get("success") or result.get("exit_code") != 0:
+        return result
+    used = docker_status()
+    references = {}
+    if used.get("success"):
+        for line in used.get("raw", "").splitlines()[1:]:
+            parts = line.split()
+            if len(parts) >= 2:
+                references.setdefault(parts[1], []).append(parts[0])
+    images = []
+    for line in result.get("stdout", "").splitlines():
+        repo, tag, image_id, size, created = (line.split("|", 4) + [""] * 5)[:5]
+        names = references.get(f"{repo}:{tag}", [])
+        images.append({"repository": repo, "tag": tag, "id": image_id, "size": size, "created": created, "containers": names, "state": "USED" if names else ("DANGLING" if repo == "<none>" else "UNUSED")})
+    return {"success": True, "images": images}
 
 
 def docker_health_status() -> dict:
