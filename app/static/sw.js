@@ -1,9 +1,9 @@
-const CACHE = 'jarvis-shell-v32';
+const CACHE = 'jarvis-shell-v34';
 const PRECACHE = [
   '/',
   '/static/boot.js?v=32',
-  '/static/app.css?v=32',
-  '/static/app.js?v=32',
+  '/static/app.css?v=34',
+  '/static/app.js?v=34',
   '/static/manifest.webmanifest',
   '/static/icon-192.svg',
   '/static/icon-512.svg'

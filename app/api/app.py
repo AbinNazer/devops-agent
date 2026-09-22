@@ -31,6 +31,8 @@ from fastapi.staticfiles import StaticFiles
 from app.config import Config
 from app.agent import Agent, SYSTEM_PROMPT
 from app.llm_router import build_router, LLMRouter, ProviderState
+from app.personality import get_conversation_state
+from app.personality.preferences_bridge import load_communication_preferences as _load_communication_preferences
 from app.tool_registry import TOOL_SCHEMAS, TOOL_NAMES, execute_tool, handle_memory_command
 from app.api.models import (
     ChatRequest, ChatResponse, ChatMessage, MessageRole, ToolCallInfo, ToolResultInfo,
@@ -472,7 +474,7 @@ def _pg_model(data: dict) -> Conversation:
     return Conversation(id=data["id"], title=data["title"], provider=data["provider"], created_at=data.get("created_at") or datetime.utcnow(), updated_at=data.get("updated_at") or datetime.utcnow(), messages=messages)
 
 
-def _build_agent(provider_override: Optional[str] = None) -> Agent:
+def _build_agent(provider_override: Optional[str] = None, conversation_id: Optional[str] = None) -> Agent:
     """Build an agent with an optional request-scoped provider override.
 
     The override never mutates the router's selected provider, so normal chat
@@ -495,6 +497,8 @@ def _build_agent(provider_override: Optional[str] = None) -> Agent:
         execute_tool_fn=execute_tool,
         memory_command_handler=handle_memory_command,
         allowed_tool_names=TOOL_NAMES,
+        conversation_state=get_conversation_state(conversation_id or "api-default"),
+        preference_loader=_load_communication_preferences,
     )
 
 
@@ -731,7 +735,7 @@ async def chat(conv_id: str, req: ChatRequest, request: Request):
 
     history = _build_history(conv)
 
-    agent = _build_agent(req.provider)
+    agent = _build_agent(req.provider, conversation_id=conv_id)
 
     result_text = ""
     tool_calls_made = []
@@ -806,7 +810,7 @@ async def chat_stream(conv_id: str, req: ChatRequest, request: Request):
             loop.call_soon_threadsafe(q.put_nowait, event)
 
         try:
-            agent = _build_agent(req.provider)
+            agent = _build_agent(req.provider, conversation_id=conv_id)
 
             # --- Callbacks invoked on the agent thread ---
             def on_tool_call(name, args):

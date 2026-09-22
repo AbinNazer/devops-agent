@@ -480,3 +480,25 @@ JARVIS_SEARCH_ALLOWED_ROOTS=/var/www,/etc/nginx
 ```
 
 Optional; empty means remote search is disabled. Tool Factory storage follows the existing database opt-in: `DATABASE_ENABLED=true` + `DATABASE_URL` use PostgreSQL (migration `db/migrations/002_tool_factory.sql`); otherwise an in-memory repository is used.
+
+### Personality & Natural Conversation
+
+JARVIS ships with a personality subsystem (`app/personality/`) that shapes how responses *sound* — never what they say or what the agent is allowed to do. The pipeline is: conversation state → severity classification → tone selection → humor decision → a personality directive appended to the system prompt (always last, so it can never outrank safety or grounding rules).
+
+Components:
+- **profile.py** — structured `PersonalityConfig` (humor/tone/behavior settings, banned AI-speak phrases) plus presets: `DEFAULT_JARVIS`, `PROFESSIONAL`, `CASUAL`, `MINIMAL`, `INCIDENT_MODE`.
+- **tone.py** — deterministic severity classification (`LOW`/`ELEVATED`/`CRITICAL`) from the user's words and known incident state, and tone selection (casual/technical/supportive/serious, minimal→detailed verbosity).
+- **humor.py** — the humor gate. Severity overrides everything: `CRITICAL` incidents, destructive-action contexts, security/approval/failure reports get zero humor. Casual contexts may get one light/witty beat; frequency damping prevents joke-every-message behavior.
+- **state.py** — per-conversation state (active subject, container/service, recent findings/actions, pending question) so follow-ups like "restart it" or "why?" resolve without the user repeating context.
+- **personality_context.py** — assembles the per-response directive: identity, severity, tone, humor level, length discipline, evidence-tracking confidence rules, banned-phrase list, memory-derived preferences, and conversation focus.
+- **boundaries.py** — the response quality gate: flags banned AI-speak openers and fabricated statistics (invented success rates/risk scores).
+- **preferences_bridge.py** — reads communication preferences (`response_style`, `format`, `terminology`) from the existing Phase 4 memory preference system. Memory failure degrades gracefully to the default voice; current evidence always outranks remembered style.
+
+Configuration (both optional):
+
+```
+JARVIS_PERSONALITY_PRESET=DEFAULT_JARVIS   # DEFAULT_JARVIS | PROFESSIONAL | CASUAL | MINIMAL | INCIDENT_MODE
+JARVIS_PERSONALITY_ENABLED=true            # false restores the pre-personality default voice
+```
+
+The personality layer has no tool, permission, or execution capability; `JARVIS_PERSONALITY_ENABLED=false` disables it entirely. Settings for tuning the profile live in `app/personality/profile.py` (single source of truth, not scattered prompt text).

@@ -10,6 +10,11 @@ import logging
 import re
 from concurrent.futures import ThreadPoolExecutor
 from app.context_budget import bound_history, select_tools
+from app.personality import (
+    get_conversation_state,
+    get_profile,
+)
+from app.personality.personality_context import build_personality_directive
 from app.usage_tracking import UsageRecord, get_usage_tracker, normalize_usage
 
 logger = logging.getLogger("agent")
@@ -110,7 +115,12 @@ that up to "healthy" or "fine."
 
 SYSTEM_PROMPT = CORE_SYSTEM_PROMPT + TAIL_SYSTEM_PROMPT
 
-def build_system_prompt(user_input: str) -> str:
+def build_system_prompt(user_input: str, conversation_state=None,
+                        preferences=None, response_type: str = "general") -> str:
+    """Compose the full system prompt: technical ground truth first, then
+    context sections, then the personality directive LAST — so the
+    personality shapes wording only and can never outrank the safety and
+    grounding rules above it."""
     text = (user_input or "").lower()
     sections = []
     if any(word in text for word in ("aws", "ec2", "cloudwatch")): sections.append(CONTEXT_SECTIONS["cloud"])
@@ -118,7 +128,15 @@ def build_system_prompt(user_input: str) -> str:
     if any(word in text for word in ("memory", "remember", "previous", "incident", "history")): sections.append(CONTEXT_SECTIONS["memory"])
     if any(word in text for word in ("project", "folder", "file", "code", "source", "nginx", "cron")): sections.append(CONTEXT_SECTIONS["project"])
     if any(word in text for word in ("monitor", "alert", "incident", "health")): sections.append(CONTEXT_SECTIONS["monitoring"])
-    return CORE_SYSTEM_PROMPT + ("\n\n" + "\n\n".join(sections) if sections else "") + "\n\n" + TAIL_SYSTEM_PROMPT
+    base = CORE_SYSTEM_PROMPT + ("\n\n" + "\n\n".join(sections) if sections else "") + "\n\n" + TAIL_SYSTEM_PROMPT
+    personality = build_personality_directive(
+        user_input,
+        state=conversation_state,
+        preferences=preferences,
+        profile=get_profile(),
+        response_type=response_type,
+    )
+    return base + "\n\n" + personality
 
 MAX_TOOL_ITERATIONS = 8  # safety valve against infinite tool-call loops
 
@@ -138,7 +156,8 @@ PARALLEL_READ_TOOLS = frozenset({
 
 class Agent:
     def __init__(self, provider, tool_schemas: list, execute_tool_fn,
-                 memory_command_handler=None, allowed_tool_names=None):
+                 memory_command_handler=None, allowed_tool_names=None,
+                 conversation_state=None, preference_loader=None):
         """
         provider: an LLMProvider instance
         tool_schemas: list of tool schemas to show the LLM
@@ -155,6 +174,11 @@ class Agent:
         self.execute_tool_fn = execute_tool_fn
         self.memory_command_handler = memory_command_handler
         self.allowed_tool_names = allowed_tool_names
+        # Personality wiring (additive, optional): conversation_state tracks
+        # the active subject for referent resolution; preference_loader
+        # pulls communication preferences from Phase 4 memory.
+        self.conversation_state = conversation_state
+        self.preference_loader = preference_loader
 
     def run(self, user_input: str, history: list, on_tool_call=None,
             on_tool_result=None) -> str:
@@ -176,8 +200,20 @@ class Agent:
                 history.append({"role": "assistant", "content": direct_answer})
                 return direct_answer
         history.append({"role": "user", "content": user_input})
+        if self.conversation_state is not None:
+            self.conversation_state.observe(user_input)
         if history and history[0].get("role") == "system":
-            history[0] = {**history[0], "content": build_system_prompt(user_input)}
+            preferences = None
+            if self.preference_loader is not None:
+                try:
+                    preferences = self.preference_loader()
+                except Exception:
+                    preferences = None
+            history[0] = {**history[0], "content": build_system_prompt(
+                user_input,
+                conversation_state=self.conversation_state,
+                preferences=preferences,
+            )}
         logger.info("user_request=%r", user_input)
 
         shortcut = self._deterministic_shortcut(user_input)
@@ -286,6 +322,9 @@ class Agent:
                     logger.info("tool_succeeded=%s", tc["name"])
                 if on_tool_result:
                     on_tool_result(tc["name"], tool_result)
+                if self.conversation_state is not None:
+                    summary = tool_result.get("summary") or tool_result.get("error") or ""
+                    self.conversation_state.observe_tool_result(tc["name"], str(summary))
                 history.append(self.provider.tool_result_message(tc, tool_result))
 
             if immediate_restart is not None:

@@ -48,6 +48,12 @@ class Config:
     # Execution mode: "ssh" (laptop -> VPS) or "local" (on VPS directly)
     EXECUTION_MODE = os.environ.get("EXECUTION_MODE", "ssh")
 
+    # Personality preset: DEFAULT_JARVIS | PROFESSIONAL | CASUAL | MINIMAL |
+    # INCIDENT_MODE. Personality only shapes wording — never safety rules.
+    PERSONALITY_PRESET = os.environ.get("JARVIS_PERSONALITY_PRESET", "DEFAULT_JARVIS")
+    # Master switch: when false, the agent keeps a plain default voice.
+    PERSONALITY_ENABLED = os.environ.get("JARVIS_PERSONALITY_ENABLED", "true").lower() == "true"
+
     # Tool Factory remote search: absolute paths the search tools may read
     # under (comma-separated, server-side only — never supplied per request).
     SEARCH_ALLOWED_ROOTS = os.environ.get("JARVIS_SEARCH_ALLOWED_ROOTS", "")

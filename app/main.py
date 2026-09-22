@@ -113,7 +113,11 @@ def main():
         sys.exit(1)
 
     set_control_approval_callback(_approve_control_action)
-    agent = Agent(provider=provider, tool_schemas=TOOL_SCHEMAS, execute_tool_fn=execute_tool, memory_command_handler=handle_memory_command, allowed_tool_names=TOOL_NAMES)
+    from app.personality import get_conversation_state
+    from app.personality.preferences_bridge import load_communication_preferences
+    from app.memory.repository import MemoryRepository
+    _cli_memory_repo = MemoryRepository("memory.db")
+    agent = Agent(provider=provider, tool_schemas=TOOL_SCHEMAS, execute_tool_fn=execute_tool, memory_command_handler=handle_memory_command, allowed_tool_names=TOOL_NAMES, conversation_state=get_conversation_state("cli"), preference_loader=lambda: load_communication_preferences(_cli_memory_repo))
     history = fresh_history()
 
     _print_system(f"DevOps Agent ready — {provider.name}. Type /help for commands, Ctrl+C to quit.\n")
