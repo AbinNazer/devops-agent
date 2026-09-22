@@ -51,7 +51,6 @@ class TestPersonalityDirective:
         monkeypatch.setenv("JARVIS_PERSONALITY_PRESET", "PROFESSIONAL")
         d = build_personality_directive("check docker")
         assert "Humor: none" in d
-
     def test_directive_includes_state(self):
         s = ConversationState()
         s.observe("look at the redis container")
@@ -66,6 +65,24 @@ class TestPersonalityDirective:
         d = build_personality_directive("restart the jenkins container",
                                         response_type="destructive_action")
         assert "Humor: none" in d
+
+    def test_casual_message_welcomes_humor(self):
+        """Casual messages must invite humor (SARCASTIC at level 0.8), not
+        merely permit it — this is the fix for 'can't see any humor'."""
+        d = build_personality_directive("hey what's up")
+        assert "Humor: light sarcasm is welcome" in d
+
+    def test_joking_message_welcomes_humor(self):
+        d = build_personality_directive("lol docker crashed again")
+        humor_line = next(l for l in d.splitlines() if l.startswith("- Humor"))
+        assert "none" not in humor_line.split(":")[1]
+
+    def test_technical_message_humor_not_sarcastic(self):
+        """Technical paste (long traceback) is not the sarcastic branch."""
+        text = ("Traceback (most recent call last): " * 12) + " error log stack"
+        d = build_personality_directive(text)
+        assert "light sarcasm is welcome" not in d
+        assert "Humor:" in d  # some explicit humor guidance still present
 
 
 class TestSystemPromptIntegration:

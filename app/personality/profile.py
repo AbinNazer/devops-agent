@@ -19,7 +19,8 @@ class HumorSettings:
     enabled: bool = True
     # 0.0 = never, 1.0 = as often as contextually appropriate. The humor
     # engine treats this as a ceiling; incident severity always clamps it.
-    level: float = 0.6
+    # 0.8 = the default JARVIS voice leans playful in casual contexts.
+    level: float = 0.8
     style: str = "dry_witty"          # dry_witty | playful | off
     frequency: str = "situational"    # situational | rare | off
 

@@ -108,18 +108,36 @@ class TestHumorGate:
         d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "failure_report")
         assert d.level is HumorLevel.NONE
 
-    def test_casual_chat_gets_humor(self):
+    def test_casual_chat_gets_sarcastic(self):
+        """Default profile (humor level 0.8): casual chat unlocks sarcasm."""
         d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat")
-        assert d.level in (HumorLevel.LIGHT, HumorLevel.WITTY)
+        assert d.level is HumorLevel.SARCASTIC
+
+    def test_neutral_context_still_gets_witty(self):
+        """Generic 'general' response type keeps a witty default voice."""
+        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general")
+        assert d.level is HumorLevel.WITTY
+
+    def test_low_profile_level_gets_witty_not_sarcastic(self):
+        """Profiles below the 0.7 threshold get WITTY, not SARCASTIC."""
+        from app.personality.profile import PersonalityConfig, HumorSettings
+        shy = PersonalityConfig(humor=HumorSettings(enabled=True, level=0.5))
+        d = should_use_humor(shy, Severity.LOW, "general_chat")
+        assert d.level is HumorLevel.WITTY
 
     def test_elevated_caps_at_light(self):
         d = should_use_humor(DEFAULT_JARVIS, Severity.ELEVATED, "general_chat")
         assert d.level is HumorLevel.LIGHT
 
     def test_frequency_damping(self):
-        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat", recent_humor_count=2)
+        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat", recent_humor_count=3)
         assert d.level in (HumorLevel.LIGHT, HumorLevel.NONE)
         assert "damping" in d.reasoning
+
+    def test_damping_threshold_tolerance(self):
+        """Two humorous responses in a row does not yet trigger damping."""
+        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat", recent_humor_count=2)
+        assert d.level is HumorLevel.SARCASTIC
 
     def test_disabled_profile_never_humor(self):
         d = should_use_humor(PRESETS["PROFESSIONAL"], Severity.LOW, "general_chat")

@@ -62,8 +62,9 @@ def should_use_humor(profile: PersonalityConfig,
     if not profile.humor.enabled:
         return HumorDecision(HumorLevel.NONE, "humor disabled")
 
-    # Frequency damping: at most one humorous beat in the last 3 responses.
-    if recent_humor_count >= 2:
+    # Frequency damping: at most one humorous beat in the last ~3 responses,
+    # but LOW-severity chat keeps a light beat so humor stays present.
+    if recent_humor_count >= 3:
         return HumorDecision(HumorLevel.LIGHT if severity is Severity.LOW else HumorLevel.NONE,
                              "recent responses already had humor — damping")
 
@@ -71,7 +72,7 @@ def should_use_humor(profile: PersonalityConfig,
         return HumorDecision(HumorLevel.LIGHT,
                              "elevated severity — at most light, dry humor")
     if response_type in _HUMOR_FRIENDLY_TYPES:
-        if profile.humor.level >= 0.6:
-            return HumorDecision(HumorLevel.WITTY, "casual context, humor welcomed")
-        return HumorDecision(HumorLevel.LIGHT, "casual context, conservative humor level")
-    return HumorDecision(HumorLevel.LIGHT, "neutral context — a light touch is fine")
+        if profile.humor.style == "playful" or profile.humor.level >= 0.7:
+            return HumorDecision(HumorLevel.SARCASTIC, "playful context — sarcasm welcome")
+        return HumorDecision(HumorLevel.WITTY, "casual context, humor welcomed")
+    return HumorDecision(HumorLevel.WITTY, "neutral context — a witty aside fits the default voice")

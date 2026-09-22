@@ -97,6 +97,13 @@ def build_personality_directive(user_input: str,
     severity = classify_severity(user_input, incident_severity)
     tone = select_tone(severity, style, profile.tone.verbosity, profile.tone.formality)
 
+    # Callers that leave response_type as the generic "general" get a
+    # style-derived type: casual/joking conversation is general_chat, which
+    # is the humor-friendly branch of the gate. Specific response types
+    # passed by the control pipeline ("destructive_action", etc.) always win.
+    if response_type == "general":
+        response_type = "general_chat" if style in ("casual", "joking") else "general"
+
     # Severity + user style can force humor off before the gate even runs.
     humor = should_use_humor(profile, severity, response_type, recent_humor_count=0)
     if not tone.humor_allowed and humor.level is not HumorLevel.NONE:
@@ -132,11 +139,11 @@ def _format_directive(profile: PersonalityConfig, ctx: PersonalityContext) -> st
     if ctx.humor_level is HumorLevel.NONE:
         lines.append("- Humor: none for this response. Be direct and clear; if the situation is bad, say so plainly.")
     elif ctx.humor_level is HumorLevel.LIGHT:
-        lines.append("- Humor: a light, dry aside is fine — at most one, and never at the expense of clarity.")
+        lines.append("- Humor: a light, dry aside fits here — one natural quip, worked into the answer, never at the expense of clarity.")
     elif ctx.humor_level is HumorLevel.WITTY:
-        lines.append("- Humor: a witty observation is welcome if it lands naturally. Never forced, never more than one joke.")
+        lines.append("- Humor: wit is welcome in this response. A dry observation or playful remark is encouraged — one, worked in naturally, never forced, never instead of the actual answer.")
     else:  # SARCASTIC
-        lines.append("- Humor: light sarcasm is acceptable here — dry, good-natured, never insulting.")
+        lines.append("- Humor: light sarcasm is welcome here — dry, good-natured, never insulting. One beat, on top of the real answer, never instead of it.")
 
     # Natural voice rules.
     lines += [
