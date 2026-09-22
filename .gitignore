@@ -17,6 +17,8 @@ htmlcov/
 
 # Runtime data
 memory.db
+memory.db.vectors.db
+*.vectors.db
 sessions/
 logs/
 .freebuff/
