@@ -462,6 +462,13 @@ The Tool Factory (`app/tool_factory/`) is a controlled pipeline for creating, ve
 
 `app/research.py` tracks learned skills (topic, detected version, source, confidence, safety notes, refresh timestamp), supports refresh and version comparison, reports source disagreement, and persists learned skills into Phase 4 memory. Research findings are advisory only and never executed automatically.
 
+Memory retrieval also supports semantic similarity through the local
+`sentence-transformers` model `all-MiniLM-L6-v2`. Embeddings are stored in a
+SQLite sidecar database (`memory.db.vectors.db`) and remain on the machine.
+Install it with `pip install -r requirements.txt`; the model is downloaded on
+the first semantic memory operation. If the optional dependency is unavailable,
+the existing lexical memory retrieval remains available.
+
 ### API and UI
 
 New authenticated endpoints (see `/docs`): `/api/tools` (list/create/validate/activate/deactivate/rollback/execute/audit/versions) plus `/api/project/context`, `/api/project/scan`, and `/api/research/{refresh,progress,disagreements}`. Write operations require admin/`tools.manage`; viewers are read-only. The frontend "Tools & Automation" settings section exposes the same capabilities.

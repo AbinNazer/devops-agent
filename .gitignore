@@ -44,3 +44,4 @@ desktop/node_modules/
 desktop/dist/
 desktop/node_modules/
 *.tsbuildinfo
+usage.db

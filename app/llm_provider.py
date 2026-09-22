@@ -16,6 +16,12 @@ import json
 import uuid
 from abc import ABC, abstractmethod
 
+def _usage(response):
+    """Return raw provider usage without imposing a provider-specific schema."""
+    if isinstance(response, dict):
+        return response.get("usage") or response.get("usage_metadata") or response
+    return getattr(response, "usage", None) or getattr(response, "usage_metadata", None) or response
+
 
 class LLMProvider(ABC):
     name: str
@@ -57,7 +63,7 @@ class OllamaProvider(LLMProvider):
             if isinstance(args, str):
                 args = json.loads(args)
             tool_calls.append({"id": f"call_{uuid.uuid4().hex[:12]}", "name": fn["name"], "arguments": args})
-        return {"content": msg.get("content", ""), "tool_calls": tool_calls}
+        return {"content": msg.get("content", ""), "tool_calls": tool_calls, "usage": _usage(resp)}
 
     def assistant_message(self, content: str, tool_calls: list) -> dict:
         raw = [{"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": json.dumps(tc["arguments"])}} for tc in tool_calls]
@@ -86,7 +92,7 @@ class GroqProvider(LLMProvider):
         for tc in (msg.tool_calls or []):
             args = json.loads(tc.function.arguments)
             tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": args})
-        return {"content": msg.content or "", "tool_calls": tool_calls}
+        return {"content": msg.content or "", "tool_calls": tool_calls, "usage": _usage(resp)}
 
     def assistant_message(self, content: str, tool_calls: list) -> dict:
         raw = [{
@@ -123,7 +129,7 @@ class OpenAIProvider(LLMProvider):
         for tc in (msg.tool_calls or []):
             args = json.loads(tc.function.arguments)
             tool_calls.append({"id": tc.id, "name": tc.function.name, "arguments": args})
-        return {"content": msg.content or "", "tool_calls": tool_calls}
+        return {"content": msg.content or "", "tool_calls": tool_calls, "usage": _usage(resp)}
 
     def assistant_message(self, content: str, tool_calls: list) -> dict:
         raw = [{
@@ -284,7 +290,7 @@ class AnthropicProvider(LLMProvider):
                     "input": block.input,
                 })
 
-        return {"content": text_content, "tool_calls": tool_calls}
+        return {"content": text_content, "tool_calls": tool_calls, "usage": _usage(resp)}
 
     def assistant_message(self, content: str, tool_calls: list) -> dict:
         """Build assistant message in a format that our _convert_messages can handle."""
@@ -414,6 +420,7 @@ class GeminiProvider(LLMProvider):
         return {
             "content": text_content,
             "tool_calls": tool_calls,
+            "usage": _usage(response),
         }
 
     def assistant_message(self, content: str, tool_calls: list) -> dict:

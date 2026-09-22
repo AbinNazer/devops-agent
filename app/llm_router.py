@@ -39,6 +39,7 @@ from typing import List, Optional, Dict, Any
 from app.llm_provider import (
     LLMProvider, GroqProvider, OllamaProvider, OpenAIProvider, AnthropicProvider,GeminiProvider
 )
+from app.usage_tracking import get_usage_tracker, normalize_usage
 
 logger = logging.getLogger("llm_router")
 
@@ -285,6 +286,7 @@ class LLMRouter(LLMProvider):
             logger.info("llm_request provider=%s attempt=1/%d", state.name, len(self._states))
             try:
                 result = call_provider(primary_idx)
+                self._record_usage(state, result, messages)
                 state.record_success()
                 return result
             except Exception as error:
@@ -313,6 +315,7 @@ class LLMRouter(LLMProvider):
                     logger.info("llm_fallback_race provider=%s", state.name)
                     try:
                         result = future.result()
+                        self._record_usage(state, result, messages)
                         state.record_success()
                         logger.info("llm_request_succeeded_after_failover provider=%s", state.name)
                         for pending in futures:
@@ -332,6 +335,18 @@ class LLMRouter(LLMProvider):
         raise RuntimeError(
             f"All configured LLM providers are currently unavailable. {error_summary}"
         )
+
+    @staticmethod
+    def _record_usage(state, result, messages):
+        usage = normalize_usage(result.get("usage"))
+        tracker = get_usage_tracker()
+        tracker.record(__import__("app.usage_tracking", fromlist=["UsageRecord"]).UsageRecord(
+            provider=state.name,
+            model=getattr(state.provider, "model", "unknown"),
+            request_id=str(id(result)),
+            conversation_id=str((messages[0] if messages else {}).get("conversation_id", "")),
+            **usage,
+        ), raw_usage=result.get("usage"))
 
     def _find_next_provider(self, exclude: set) -> Optional[int]:
         """Find the next usable provider index, starting from primary."""

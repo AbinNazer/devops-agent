@@ -7,11 +7,14 @@ executes anything directly — it only ever returns "call this tool with
 these arguments" as data, which the Agent decides whether/how to act on.
 """
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
+from app.context_budget import bound_history, select_tools
+from app.usage_tracking import UsageRecord, get_usage_tracker, normalize_usage
 
 logger = logging.getLogger("agent")
 
-SYSTEM_PROMPT = """You are a professional DevOps assistant investigating local, VPS, \
+CORE_SYSTEM_PROMPT = """You are a professional DevOps assistant investigating local, VPS, \
 and AWS infrastructure.
 
 Rules:
@@ -66,7 +69,17 @@ no pre-captured container configurations.
 state only what the actual code does. If something is not implemented, \
 say so. Do not present hypothetical capabilities as existing features.
 
-Phase 6 monitoring ground truth:
+"""
+
+CONTEXT_SECTIONS = {
+    "cloud": """Cloud guidance: AWS tools are read-only. Distinguish AWS, local, and VPS evidence and report unknown AWS data plainly.""",
+    "kubernetes": """Kubernetes guidance: use only the registered read-only Kubernetes tools. Never invent cluster state.""",
+    "memory": """Memory guidance: historical memory is supporting context only; live evidence takes precedence.""",
+    "project": """Project guidance: inspect authorized files only, redact secrets, and never execute project code.""",
+    "monitoring": """Monitoring guidance: monitoring is deterministic and read-only; controlled mutations must use the action pipeline.""",
+}
+
+TAIL_SYSTEM_PROMPT = """Phase 6 monitoring ground truth:
 - Monitoring tools (get_monitoring_status, get_active_incidents, \
 get_incident_detail, get_monitoring_summary, explain_anomaly) are \
 READ-ONLY. They never execute mutations.
@@ -94,6 +107,18 @@ that up to "healthy" or "fine."
 - When using memory, prioritize current evidence and live check results over historical memory facts.
 - Keep responses concise but useful.
 """
+
+SYSTEM_PROMPT = CORE_SYSTEM_PROMPT + TAIL_SYSTEM_PROMPT
+
+def build_system_prompt(user_input: str) -> str:
+    text = (user_input or "").lower()
+    sections = []
+    if any(word in text for word in ("aws", "ec2", "cloudwatch")): sections.append(CONTEXT_SECTIONS["cloud"])
+    if any(word in text for word in ("kubernetes", "k8s", "kubectl", "pod", "deployment")): sections.append(CONTEXT_SECTIONS["kubernetes"])
+    if any(word in text for word in ("memory", "remember", "previous", "incident", "history")): sections.append(CONTEXT_SECTIONS["memory"])
+    if any(word in text for word in ("project", "folder", "file", "code", "source", "nginx", "cron")): sections.append(CONTEXT_SECTIONS["project"])
+    if any(word in text for word in ("monitor", "alert", "incident", "health")): sections.append(CONTEXT_SECTIONS["monitoring"])
+    return CORE_SYSTEM_PROMPT + ("\n\n" + "\n\n".join(sections) if sections else "") + "\n\n" + TAIL_SYSTEM_PROMPT
 
 MAX_TOOL_ITERATIONS = 8  # safety valve against infinite tool-call loops
 
@@ -151,13 +176,35 @@ class Agent:
                 history.append({"role": "assistant", "content": direct_answer})
                 return direct_answer
         history.append({"role": "user", "content": user_input})
+        if history and history[0].get("role") == "system":
+            history[0] = {**history[0], "content": build_system_prompt(user_input)}
         logger.info("user_request=%r", user_input)
+
+        shortcut = self._deterministic_shortcut(user_input)
+        if shortcut:
+            name, args = shortcut
+            if on_tool_call: on_tool_call(name, args)
+            result = self.execute_tool_fn(name, args)
+            if on_tool_result: on_tool_result(name, result)
+            answer = self._shortcut_answer(name, result)
+            history.append({"role": "assistant", "content": answer})
+            return answer
 
         content = ""
         called_tools = set()
 
         for iteration in range(MAX_TOOL_ITERATIONS):
-            result = self.provider.chat(history, self.tool_schemas)
+            bounded = bound_history(history)
+            result = self.provider.chat(bounded, select_tools(self.tool_schemas, user_input))
+            # Request-scoped provider overrides bypass LLMRouter; account for
+            # them here using the same normalized usage contract.
+            if not hasattr(self.provider, "providers"):
+                get_usage_tracker().record(UsageRecord(
+                    provider=getattr(self.provider, "name", "unknown"),
+                    model=getattr(self.provider, "model", "unknown"),
+                    request_id=str(id(result)),
+                    **normalize_usage(result.get("usage")),
+                ), raw_usage=result.get("usage"))
             content = result["content"]
             tool_calls = result["tool_calls"]
 
@@ -252,3 +299,19 @@ class Agent:
         # Safety valve hit — return whatever text we have, or a clear admission
         logger.warning("max_tool_iterations_reached")
         return content or "I wasn't able to reach a conclusion within a reasonable number of tool calls."
+
+    @staticmethod
+    def _deterministic_shortcut(text):
+        normalized = " ".join((text or "").lower().split()).strip(" ?.! ")
+        if re.fullmatch(r"(what is my )?(current )?cpu( usage| load)?", normalized): return ("get_cpu_usage", {})
+        if re.fullmatch(r"(what is my )?(current )?memory( usage)?", normalized): return ("get_memory_usage", {})
+        if re.fullmatch(r"(what is my )?(current )?disk( usage| space)?", normalized): return ("get_disk_usage", {})
+        if normalized in {"uptime", "what is the uptime", "how long has the server been up"}: return ("get_uptime", {})
+        if normalized in {"show containers", "list containers", "what containers are running"}: return ("docker_status", {})
+        return None
+
+    @staticmethod
+    def _shortcut_answer(name, result):
+        if not result.get("success", True): return f"I couldn't retrieve {name.replace('_', ' ')}: {result.get('error', 'unknown error')}"
+        values = {k: v for k, v in result.items() if k not in {"success", "raw"}}
+        return f"{name.replace('_', ' ').title()}: {values if values else result.get('raw', 'completed')}"

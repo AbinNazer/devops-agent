@@ -509,6 +509,17 @@ def health():
         provider=router.name,
     )
 
+@app.get("/api/usage")
+def llm_usage(request: Request, period: str = "session"):
+    """Provider-neutral LLM token usage summary."""
+    if not session_user(request.cookies.get("jarvis_session")):
+        raise HTTPException(status_code=401, detail="Authentication required")
+    from app.usage_tracking import get_usage_tracker
+    import time
+    from app.usage_tracking import SESSION_STARTED
+    since = 0 if period == "all" else time.time() - 86400 if period == "today" else SESSION_STARTED
+    return get_usage_tracker().summary(since)
+
 
 # ── Infrastructure Status ─────────────────────────────────────
 

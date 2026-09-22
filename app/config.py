@@ -27,10 +27,12 @@ class Config:
     LOGIN_RATE_WINDOW_SECONDS = int(os.environ.get("JARVIS_LOGIN_RATE_WINDOW_SECONDS", "300"))
     # Which LLM backend to use: "ollama" or "groq"
     LLM_PROVIDER = os.environ.get("LLM_PROVIDER", "ollama")
+    EMBEDDING_PROVIDER = os.environ.get("EMBEDDING_PROVIDER", "hashing")
 
     # Ollama (local)
     OLLAMA_HOST = os.environ.get("OLLAMA_HOST", "http://localhost:11434")
     OLLAMA_MODEL = os.environ.get("OLLAMA_MODEL", "qwen2.5:7b")
+    OLLAMA_EMBEDDING_MODEL = os.environ.get("OLLAMA_EMBEDDING_MODEL", "nomic-embed-text")
 
     # Groq (hosted)
     GROQ_API_KEY = os.environ.get("GROQ_API_KEY", "")
@@ -68,11 +70,13 @@ class Config:
     # Google Gemini (hosted)
     GEMINI_API_KEY = os.environ.get("GEMINI_API_KEY", "")
     GEMINI_MODEL = os.environ.get("GEMINI_MODEL", "gemini-2.5-flash")
+    GEMINI_EMBEDDING_MODEL = os.environ.get("GEMINI_EMBEDDING_MODEL", "text-embedding-004")
 
     # OpenAI (hosted)
     OPENAI_API_KEY = os.environ.get("OPENAI_API_KEY", "")
     OPENAI_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o")
     OPENAI_BASE_URL = os.environ.get("OPENAI_BASE_URL", "")  # e.g. AgentRouter
+    OPENAI_EMBEDDING_MODEL = os.environ.get("OPENAI_EMBEDDING_MODEL", "text-embedding-3-small")
 
     OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
     OPENROUTER_MODEL = os.environ.get("OPENROUTER_MODEL", "meta-llama/llama-3.1-8b-instruct:free")

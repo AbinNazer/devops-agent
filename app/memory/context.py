@@ -1,7 +1,7 @@
 from .retrieval import search_memories
 
 def inject_context(repository, question, live_evidence=None, environment=None, component=None, limit=5, max_chars=1800):
-    memories = search_memories(repository.store.list_all(include_inactive=False), question, env=environment, comp=component, limit=limit)
+    memories = repository.search(question, env=environment, comp=component, limit=limit) if hasattr(repository, "search") else search_memories(repository.store.list_all(include_inactive=False), question, env=environment, comp=component, limit=limit)
     entries, used = [], 0
     for memory in memories:
         item = {"id": memory.id, "title": memory.title, "content": memory.content, "confidence": memory.confidence, "source": memory.source, "environment": memory.environment, "component": memory.component}
