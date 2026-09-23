@@ -12,7 +12,7 @@ from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
 from app.personality.humor import HumorDecision, HumorLevel, should_use_humor
-from app.personality.profile import PersonalityConfig, get_profile
+from app.personality.profile import PersonalityConfig, VoiceFlavorSettings, get_profile
 from app.personality.state import ConversationState
 from app.personality.tone import Severity, ToneDirective, classify_severity, select_tone
 
@@ -118,6 +118,38 @@ def build_personality_directive(user_input: str,
     ))
 
 
+# --------------------------------------------------------------- dialect --
+
+# kasi (South African street) flavor. Used as seasoning, never as a costume:
+# the technical content must always read like a sharp engineer wrote it, with
+# slang worked into the delivery. The model chooses naturally; these are
+# examples of register, not a script to insert verbatim.
+_KASI_WORDS = ("aweh", "eish", "yoh", "haibo", "sharp sharp", "sure thing", "aye")
+
+
+def _flavor_lines(voice: VoiceFlavorSettings, ctx: PersonalityContext) -> List[str]:
+    if ctx.humor_level is HumorLevel.NONE or voice.style == "none":
+        return []
+    if voice.style == "kasi":
+        if voice.intensity >= 0.7:
+            register = ("- Voice flavor: full kasi street energy — greet like a friend "
+                        "(\"aweh\", \"sharp sharp\"), react with \"eish\", \"yoh\", "
+                        "\"haibo\" when something's wild. Slang can appear in most "
+                        "casual responses, but the technical facts stay precise and "
+                        "unaffected.")
+        else:
+            register = ("- Voice flavor: light kasi seasoning — an occasional \"aweh\", "
+                        "\"eish\", \"yoh\" or \"sharp sharp\" when it lands naturally. "
+                        "Most responses stay plain; the slang is a wink, not a uniform.")
+        return [
+            register,
+            "- Flavor rules: slang affects WORDING only. Never let it touch numbers, "
+            "commands, severities, or safety instructions. When severity is elevated "
+            "or the user is frustrated, drop to plain speech automatically.",
+        ]
+    return []
+
+
 def _format_directive(profile: PersonalityConfig, ctx: PersonalityContext) -> str:
     """Render the resolved decisions as compact prompt guidance."""
     lines = [
@@ -144,6 +176,10 @@ def _format_directive(profile: PersonalityConfig, ctx: PersonalityContext) -> st
         lines.append("- Humor: wit is welcome in this response. A dry observation or playful remark is encouraged — one, worked in naturally, never forced, never instead of the actual answer.")
     else:  # SARCASTIC
         lines.append("- Humor: light sarcasm is welcome here — dry, good-natured, never insulting. One beat, on top of the real answer, never instead of it.")
+
+    # Voice flavor (Part: dialect). Wording only, and only when humor is
+    # allowed at all — flavor never overrides the severity suppression.
+    lines.extend(_flavor_lines(profile.voice, ctx))
 
     # Natural voice rules.
     lines += [

@@ -110,3 +110,32 @@ class TestSystemPromptIntegration:
     def test_prompt_includes_grounding_rules(self):
         p = build_system_prompt("hello")
         assert "invent" in p.lower()  # grounding: never invent logs/metrics
+
+
+class TestVoiceFlavor:
+    def test_casual_directive_carries_kasi_flavor(self):
+        """Default profile (kasi, 0.45): casual chat includes flavor lines."""
+        d = build_personality_directive("hey what's up")
+        assert "Voice flavor" in d
+        assert "kasi" in d
+
+    def test_flavor_suppressed_on_destructive_actions(self):
+        d = build_personality_directive("restart the jenkins container",
+                                        response_type="destructive_action")
+        assert "Voice flavor" not in d
+
+    def test_flavor_suppressed_when_humor_none(self):
+        from app.personality.profile import PersonalityConfig, HumorSettings
+        stone = PersonalityConfig(humor=HumorSettings(enabled=False, level=0.0))
+        d = build_personality_directive("hello there", profile=stone)
+        assert "Voice flavor" not in d
+
+    def test_kasi_preset_directive_is_full_flavor(self):
+        from app.personality.profile import PRESETS
+        d = build_personality_directive("hey, check docker for me",
+                                        profile=PRESETS["KASI"])
+        assert "full kasi street energy" in d
+
+    def test_flavor_rules_bound_technical_content(self):
+        d = build_personality_directive("hey")
+        assert "WORDING only" in d

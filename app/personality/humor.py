@@ -62,9 +62,11 @@ def should_use_humor(profile: PersonalityConfig,
     if not profile.humor.enabled:
         return HumorDecision(HumorLevel.NONE, "humor disabled")
 
-    # Frequency damping: at most one humorous beat in the last ~3 responses,
-    # but LOW-severity chat keeps a light beat so humor stays present.
-    if recent_humor_count >= 3:
+    # Frequency damping: at most one humorous beat in the last ~4 responses,
+    # but LOW-severity chat keeps a light beat so humor stays present. The
+    # default profile is maxed (0.95), so damping only kicks in when the
+    # model has genuinely been leaning on jokes.
+    if recent_humor_count >= 4:
         return HumorDecision(HumorLevel.LIGHT if severity is Severity.LOW else HumorLevel.NONE,
                              "recent responses already had humor — damping")
 

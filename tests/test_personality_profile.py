@@ -17,8 +17,19 @@ class TestProfile:
         assert p.behavior.admit_uncertainty is True
 
     def test_presets_exist(self):
-        for name in ("DEFAULT_JARVIS", "PROFESSIONAL", "CASUAL", "MINIMAL", "INCIDENT_MODE"):
+        for name in ("DEFAULT_JARVIS", "PROFESSIONAL", "CASUAL", "KASI", "MINIMAL", "INCIDENT_MODE"):
             assert name in PRESETS
+
+    def test_default_voice_is_kasi(self):
+        """The default JARVIS voice carries light kasi seasoning."""
+        assert DEFAULT_JARVIS.voice.style == "kasi"
+        assert 0.3 <= DEFAULT_JARVIS.voice.intensity <= 0.6
+
+    def test_kasi_preset_is_full_flavor(self):
+        p = PRESETS["KASI"]
+        assert p.voice.style == "kasi"
+        assert p.voice.intensity >= 0.7
+        assert p.humor.enabled is True and p.humor.level >= 0.9
 
     def test_incident_mode_disables_humor(self):
         p = PRESETS["INCIDENT_MODE"]
@@ -130,13 +141,13 @@ class TestHumorGate:
         assert d.level is HumorLevel.LIGHT
 
     def test_frequency_damping(self):
-        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat", recent_humor_count=3)
+        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat", recent_humor_count=4)
         assert d.level in (HumorLevel.LIGHT, HumorLevel.NONE)
         assert "damping" in d.reasoning
 
     def test_damping_threshold_tolerance(self):
-        """Two humorous responses in a row does not yet trigger damping."""
-        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat", recent_humor_count=2)
+        """Three humorous responses in a row does not yet trigger damping."""
+        d = should_use_humor(DEFAULT_JARVIS, Severity.LOW, "general_chat", recent_humor_count=3)
         assert d.level is HumorLevel.SARCASTIC
 
     def test_disabled_profile_never_humor(self):
