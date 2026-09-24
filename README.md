@@ -255,6 +255,35 @@ animated assistant avatar, provider/settings controls, Aurora Dark and Bright
 Light themes, infrastructure status, logout, and the local terminal view.
 Static UI changes do not require a database migration.
 
+#### Terminal sessions
+
+The terminal page is served under a strict CSP (`script-src 'self'`), so its
+xterm.js bundle is **vendored** in `app/static/vendor/xterm/` rather than loaded
+from a CDN — a CDN reference is blocked by the browser and leaves the page stuck
+on its connecting spinner with no error. See
+`app/static/vendor/xterm/README.md` for versions and update steps.
+
+`/api/terminal/session`, `GET /api/terminal/sessions` and both close routes
+(`DELETE` and the `POST` used by `navigator.sendBeacon`) require a valid
+session; the WebSocket accepts before closing so the browser can actually see
+the reason (4401 not authenticated, 4004 session gone, 1011 PTY setup failed).
+The page turns those into distinct messages instead of a generic failure, and
+re-creates a session once if the previous one expired.
+
+Two behaviours are worth knowing when debugging an installed home-screen app:
+
+- A home-screen app has its **own cookie storage**, so a login from a normal
+  browser tab does not carry over. Sign in inside the app; the terminal page
+  says "Not signed in" when that is the actual problem.
+- With `DATABASE_ENABLED=false` web sessions live in server memory, so
+  **restarting the service signs every browser out** — including the installed
+  app, whose cookie is now invalid.
+
+Terminal connection and rejection events are written to `logs/agent.log`
+(`terminal_ws_connected`, `terminal_ws_rejected`, `terminal_created`,
+`terminal_reaped`) whenever the API starts, so failures can be diagnosed from
+the server side rather than only from the browser.
+
 ### Updating a VPS UI-only deployment
 
 When PostgreSQL is disabled (`DATABASE_ENABLED=false`), pull UI updates and
@@ -266,9 +295,11 @@ git pull
 sudo systemctl restart devops-agent
 ```
 
-No migration is needed for CSS, JavaScript, HTML, or PWA-cache changes. If a
-phone home-screen app still shows an older version, close it completely and
-open it again; the static asset cache version is bumped with UI releases.
+No migration is needed for CSS, JavaScript, HTML, or PWA-cache changes. Static
+assets are cached stale-while-revalidate, so an installed app refreshes them on
+the following launch; the `CACHE` name in `app/static/sw.js` is still bumped on
+UI releases to retire the old cache immediately. If a phone home-screen app
+still shows an older version, close it completely and open it again.
 
 ## Configure infrastructure
 
@@ -394,6 +425,47 @@ RUN_LLM_INTEGRATION_TESTS=1 pytest -v
 RUN_VPS_INTEGRATION_TESTS=1 pytest -v
 ```
 
+## Safe file editing (`scripts/edit.py`)
+
+A small, stdlib-only CLI for scriptable file edits. It is not a `sed` replacement: `replace` requires the exact `--old` string to occur **exactly once**, so a typo or an ambiguous pattern is refused instead of silently rewriting the wrong line — the same guarantee an AI coding assistant gives when it edits a file.
+
+```bash
+# read
+python scripts/edit.py view app/config.py --start 40 --end 80   # numbered lines
+python scripts/edit.py view app/                                 # or an ls-style listing
+
+# edit (exact single match required)
+python scripts/edit.py replace app/config.py --old "DEBUG = False" --new "DEBUG = True"
+python scripts/edit.py replace app/config.py --old-file old.txt --new-file new.txt   # multi-line
+python scripts/edit.py replace app/config.py --old 'a\nb' --new 'c' --unescape --dry-run
+
+# create / append (content from stdin, so heredocs work)
+python scripts/edit.py create app/tools_cli/note.py << 'EOF'
+print("hello")
+EOF
+python scripts/edit.py append logs/notes.md << 'EOF'
+- reviewed the monitoring thresholds
+EOF
+
+# inspect and recover
+python scripts/edit.py diff app/config.py app/config.py.orig
+python scripts/edit.py undo app/config.py
+
+# search (stdlib, no rg/grep binary needed)
+python scripts/edit.py grep EXECUTION_MODE app --recursive --fixed -i
+```
+
+Safety properties: every write backs the original up to `.edit_backups/<timestamp>_<filename>` (next to the edited file, git-ignored) before touching it; writes are atomic (temp file + rename), so a crash mid-write cannot truncate a file; line endings are preserved byte-for-byte (a CRLF file stays CRLF); `--dry-run` on `replace`/`create`/`append`/`undo` shows the diff without writing; no shell is ever invoked. Exit codes are `0` success, `1` refused (no match, ambiguous match, missing file), `2` usage/I-O error.
+
+Alias it so editing is as quick as `nano`:
+
+```bash
+alias edit="python /path/to/devops-agent/scripts/edit.py"
+# then: edit replace app/config.py --old "DEBUG = False" --new "DEBUG = True"
+```
+
+Run its tests with `pytest -q tests/test_edit_cli.py`.
+
 ## Project layout
 
 ```text
@@ -408,6 +480,7 @@ app/
   llm_provider.py      individual provider clients
   llm_router.py        provider routing and failover
   ssh_whitelist.py     SSH command validation
+scripts/               developer CLIs (migrations, safe file editing)
 worker/                future outbound worker protocol/capabilities
 desktop/               React/Tauri desktop UI
 sessions/              persisted chat sessions
@@ -486,11 +559,14 @@ Optional; empty means remote search is disabled. Tool Factory storage follows th
 JARVIS ships with a personality subsystem (`app/personality/`) that shapes how responses *sound* — never what they say or what the agent is allowed to do. The pipeline is: conversation state → severity classification → tone selection → humor decision → a personality directive appended to the system prompt (always last, so it can never outrank safety or grounding rules).
 
 Components:
-- **profile.py** — structured `PersonalityConfig` (humor/tone/behavior settings, banned AI-speak phrases) plus presets: `DEFAULT_JARVIS`, `PROFESSIONAL`, `CASUAL`, `MINIMAL`, `INCIDENT_MODE`.
-- **tone.py** — deterministic severity classification (`LOW`/`ELEVATED`/`CRITICAL`) from the user's words and known incident state, and tone selection (casual/technical/supportive/serious, minimal→detailed verbosity).
+- **profile.py** — structured `PersonalityConfig` (humor/tone/behavior settings, banned AI-speak phrases), the three **voice registers** (`casual`, `focused`, `urgent`) with their reference phrasings, and presets: `DEFAULT_JARVIS`, `PROFESSIONAL`, `CASUAL`, `KASI`, `MINIMAL`, `INCIDENT_MODE`.
+- **tone.py** — deterministic severity classification (`LOW`/`ELEVATED`/`CRITICAL`) from the user's words and known incident state, and tone selection (casual/focused/technical/supportive/serious, minimal→detailed verbosity). `ELEVATED` raises the volume on its own: a degraded system is answered in the focused register even if the user is joking.
 - **humor.py** — the humor gate. Severity overrides everything: `CRITICAL` incidents, destructive-action contexts, security/approval/failure reports get zero humor. Casual contexts may get one light/witty beat; frequency damping prevents joke-every-message behavior.
 - **state.py** — per-conversation state (active subject, container/service, recent findings/actions, pending question) so follow-ups like "restart it" or "why?" resolve without the user repeating context.
-- **personality_context.py** — assembles the per-response directive: identity, severity, tone, humor level, length discipline, evidence-tracking confidence rules, banned-phrase list, memory-derived preferences, and conversation focus.
+- **personality_context.py** — assembles the per-response directive: identity (one character, three volumes), severity, register, tone, humor level, length discipline, reference phrasings for the active register, dialect discipline, evidence-tracking confidence rules, banned-phrase list, memory-derived preferences, and conversation focus.
+- **response_style.py** — the single definition of verbosity guidance, referenced by the directive instead of restating it.
+
+The directive is the only place personality text is produced, and it is appended last in the system prompt, so the CLI agent and the web/PWA chat (which share `build_system_prompt`) always sound like the same character.
 - **boundaries.py** — the response quality gate: flags banned AI-speak openers and fabricated statistics (invented success rates/risk scores).
 - **preferences_bridge.py** — reads communication preferences (`response_style`, `format`, `terminology`) from the existing Phase 4 memory preference system. Memory failure degrades gracefully to the default voice; current evidence always outranks remembered style.
 

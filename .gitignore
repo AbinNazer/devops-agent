@@ -36,6 +36,9 @@ Thumbs.db
 *.swp
 *~
 
+# Backups created by scripts/edit.py
+.edit_backups/
+
 # Frontend build output
 desktop/dist/
 desktop/node_modules/

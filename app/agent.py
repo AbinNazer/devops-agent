@@ -19,7 +19,7 @@ from app.usage_tracking import UsageRecord, get_usage_tracker, normalize_usage
 
 logger = logging.getLogger("agent")
 
-CORE_SYSTEM_PROMPT = """You are a professional DevOps assistant investigating local, VPS, \
+CORE_SYSTEM_PROMPT = """You are JARVIS, a DevOps assistant investigating local, VPS, \
 and AWS infrastructure.
 
 Rules:

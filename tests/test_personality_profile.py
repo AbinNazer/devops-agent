@@ -2,7 +2,8 @@
 import pytest
 
 from app.personality.profile import (
-    DEFAULT_JARVIS, PRESETS, PersonalityConfig, get_profile,
+    DEFAULT_JARVIS, PRESETS, VOICE_REGISTERS, VOICE_VOLUME_DIAL,
+    PersonalityConfig, get_profile,
 )
 from app.personality.tone import Severity, classify_severity, select_tone
 from app.personality.humor import HumorLevel, should_use_humor
@@ -92,6 +93,59 @@ class TestTone:
     def test_asking_for_explanation_gets_detailed(self):
         t = select_tone(LOW := Severity.LOW, "asking_for_explanation", 0.4, 0.2)
         assert t.verbosity == "detailed"
+
+    def test_elevated_forces_focused_tone(self):
+        """Degraded infrastructure raises the volume no matter how relaxed
+        the user sounds — a casual message must not keep the response casual
+        while something is actually broken."""
+        t = select_tone(Severity.ELEVATED, "casual", 0.4, 0.2)
+        assert t.style == "focused"
+        assert t.verbosity == "concise"
+        assert t.humor_allowed is True
+
+    def test_elevated_joking_user_still_gets_focused(self):
+        """A joke must not talk a degraded system back down to casual."""
+        t = select_tone(Severity.ELEVATED, "joking", 0.4, 0.2)
+        assert t.style == "focused"
+
+    def test_elevated_hurried_user_stays_focused_but_minimal(self):
+        t = select_tone(Severity.ELEVATED, "in_a_hurry", 0.4, 0.2)
+        assert t.style == "focused"
+        assert t.verbosity == "minimal"
+
+    def test_elevated_frustrated_user_still_supportive(self):
+        t = select_tone(Severity.ELEVATED, "frustrated", 0.4, 0.2)
+        assert t.style == "supportive"
+        assert t.humor_allowed is False
+
+
+class TestVoiceRegisters:
+    """The voice is one character at three volumes, defined once as data."""
+
+    def test_every_volume_is_defined(self):
+        for key in ("casual", "casual_full", "focused", "urgent"):
+            assert key in VOICE_REGISTERS
+
+    def test_every_register_ships_reference_phrasings(self):
+        for key, register in VOICE_REGISTERS.items():
+            assert len(register.examples) >= 2, f"{key} needs examples to pattern-match"
+            assert register.instruction, f"{key} needs register discipline"
+            assert register.when, f"{key} needs a situation"
+
+    def test_urgent_register_models_no_banter(self):
+        """The urgent register must never demonstrate slang or jokes."""
+        urgent = VOICE_REGISTERS["urgent"]
+        text = " ".join(urgent.examples + (urgent.instruction,)).lower()
+        for marker in ("aweh", "eish", "yoh", "haibo", "lol", "haha"):
+            assert marker not in text
+
+    def test_volume_dial_demonstrates_the_tone_switch(self):
+        assert "casual:" in VOICE_VOLUME_DIAL
+        assert "outage:" in VOICE_VOLUME_DIAL
+
+    def test_full_flavor_examples_differ_from_light_ones(self):
+        assert VOICE_REGISTERS["casual_full"].examples != VOICE_REGISTERS["casual"].examples
+        assert VOICE_REGISTERS["casual_full"].name == VOICE_REGISTERS["casual"].name
 
 
 class TestHumorGate:

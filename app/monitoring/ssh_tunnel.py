@@ -154,13 +154,16 @@ class SSHTunnelManager:
 
         self._tunnel_lifetime_seconds = 0.0
         audit_logger.info(
-            "TUNNEL_OPENED remote=%s:%d local=%s:%d lifetime=%ds",
+            # Ports are logged with %s, not %d: _local_port is legitimately None
+            # until the listener exists, and a %d placeholder with None raises
+            # inside the logging call itself instead of just logging a value.
+            "TUNNEL_OPENED remote=%s:%s local=%s:%s lifetime=%ss",
             self._remote_host, self._remote_port,
             LOCAL_BIND_HOST, self._local_port,
             self._max_lifetime,
         )
         logger.info(
-            "ssh_tunnel_started local=%s:%d remote=%s:%d",
+            "ssh_tunnel_started local=%s:%s remote=%s:%s",
             LOCAL_BIND_HOST, self._local_port,
             self._remote_host, self._remote_port,
         )
@@ -345,7 +348,7 @@ class SSHTunnelManager:
             self._tunnel_lifetime_seconds = round(time.time() - self._start_time, 2)
 
         audit_logger.info(
-            "TUNNEL_CLOSED local=%s:%d lifetime=%ss",
+            "TUNNEL_CLOSED local=%s:%s lifetime=%ss",
             LOCAL_BIND_HOST, self._local_port,
             self._tunnel_lifetime_seconds,
         )

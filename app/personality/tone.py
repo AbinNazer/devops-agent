@@ -61,6 +61,16 @@ def select_tone(severity: Severity, user_style: str, base_verbosity: float,
             humor_allowed=False,
             reasoning="critical severity — clarity and correctness outrank personality",
         )
+    # ELEVATED: something is actually broken, so the volume goes up regardless
+    # of how relaxed the user sounds. A joking user must not talk the response
+    # back down while infrastructure is degraded; the two requests below are
+    # kept because they tighten the answer further, never loosen it.
+    if severity is Severity.ELEVATED and user_style not in ("frustrated", "in_a_hurry"):
+        return ToneDirective(
+            severity=severity, verbosity="concise", style="focused",
+            humor_allowed=True,
+            reasoning="something is degraded — status and impact first, sharp and plain, no banter",
+        )
     if user_style == "frustrated":
         return ToneDirective(
             severity=severity, verbosity="concise", style="supportive",
@@ -69,7 +79,8 @@ def select_tone(severity: Severity, user_style: str, base_verbosity: float,
         )
     if user_style == "in_a_hurry":
         return ToneDirective(
-            severity=severity, verbosity="minimal", style="casual",
+            severity=severity, verbosity="minimal",
+            style="focused" if severity is Severity.ELEVATED else "casual",
             humor_allowed=True,
             reasoning="user wants speed — answer in as few words as possible",
         )

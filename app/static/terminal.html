@@ -4,8 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>JARVIS Terminal</title>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
-  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/css/xterm.min.css">
+  <link rel="stylesheet" href="/static/vendor/xterm/xterm.min.css?v=5.5.0">
   <style>
     * { margin:0; padding:0; box-sizing:border-box; }
     body { background:#0a0e17; color:#c8d6e5; font-family:monospace; height:100vh; display:flex; flex-direction:column; overflow:hidden; }
@@ -35,6 +34,8 @@
     .ov p { color:#8899aa; margin-top:16px; font-size:14px; }
     .ov button { background:#00d4ff22; color:#00d4ff; border:1px solid #00d4ff44; padding:8px 20px; border-radius:4px; cursor:pointer; font-family:monospace; margin-top:12px; }
     .et { color:#ff5252 !important; }
+    #eHint { max-width:460px; text-align:center; font-size:12px; line-height:1.55; color:#8899aa !important; }
+    #eSignin { color:#00d4ff; font-size:13px; text-decoration:underline; padding:8px 12px; }
     @media (max-width:720px) {
       html, body { background:#000; }
       body { height:100dvh; height:var(--viewport-height, 100dvh); }
@@ -85,10 +86,17 @@
     <button onclick="doKey('\x1b[6~')">PGDN</button>
   </div>
   <div class="ov" id="cOv"><div class="spi"></div><p>Connecting to VPS...</p></div>
-  <div class="ov" id="eOv" style="display:none"><p class="et" id="eMsg">Connection failed</p><button onclick="doReconnect()">Retry</button></div>
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/xterm@5.5.0/lib/xterm.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-fit@0.10.0/lib/addon-fit.min.js"></script>
-  <script src="https://cdn.jsdelivr.net/npm/@xterm/addon-web-links@0.11.0/lib/addon-web-links.min.js"></script>
-  <script src="/static/terminal.js?v=33"></script>
+  <div class="ov" id="eOv" style="display:none">
+    <p class="et" id="eMsg">Connection failed</p>
+    <p id="eHint" style="display:none"></p>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap;justify-content:center">
+      <button id="eRetry" onclick="doReconnect()">Retry</button>
+      <a id="eSignin" href="/" style="display:none">Sign in again</a>
+    </div>
+  </div>
+  <script src="/static/vendor/xterm/xterm.min.js?v=5.5.0"></script>
+  <script src="/static/vendor/xterm/addon-fit.min.js?v=0.10.0"></script>
+  <script src="/static/vendor/xterm/addon-web-links.min.js?v=0.11.0"></script>
+  <script src="/static/terminal.js?v=34"></script>
 </body>
 </html>

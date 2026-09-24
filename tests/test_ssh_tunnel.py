@@ -64,6 +64,25 @@ class TestSSHTunnelManagerLifecycle:
             assert tunnel._started is True
         assert tunnel._closed is True
 
+    @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._connect_ssh")
+    @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._create_local_server")
+    @patch("app.monitoring.ssh_tunnel.SSHTunnelManager._start_forwarding")
+    def test_lifecycle_logging_never_raises(self, mock_fwd, mock_server, mock_connect,
+                                            mock_vps_config, caplog):
+        """Regression: the start/close log lines used %d for _local_port, which
+        is legitimately None until the listener exists. The call itself raised
+        TypeError once application logging configured the root logger to INFO
+        (before that, the INFO records were filtered out before formatting), so
+        the failure only appeared when logging was actually enabled."""
+        import logging
+        with caplog.at_level(logging.INFO):
+            tunnel = SSHTunnelManager(remote_port=4001)
+            tunnel.start()
+            assert tunnel._local_port is None
+            tunnel.close()
+        assert "ssh_tunnel_started" in caplog.text
+        assert "ssh_tunnel_closed" in caplog.text
+
     def test_local_port_none_before_start(self):
         tunnel = SSHTunnelManager(remote_port=4001)
         assert tunnel.local_port is None

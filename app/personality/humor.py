@@ -36,6 +36,15 @@ _HUMOR_FRIENDLY_TYPES = frozenset({
 })
 
 
+def humor_forbidden_response_type(response_type: str) -> bool:
+    """True when this response type must never carry humor at all.
+
+    Public so other personality components (voice register selection) can
+    apply the same rule instead of duplicating the list.
+    """
+    return response_type in _NO_HUMOR_RESPONSE_TYPES
+
+
 @dataclass(frozen=True)
 class HumorDecision:
     level: HumorLevel
@@ -56,7 +65,7 @@ def should_use_humor(profile: PersonalityConfig,
     if severity is Severity.CRITICAL:
         return HumorDecision(HumorLevel.NONE,
                              "critical severity — humor suppressed entirely")
-    if response_type in _NO_HUMOR_RESPONSE_TYPES:
+    if humor_forbidden_response_type(response_type):
         return HumorDecision(HumorLevel.NONE,
                              f"response type '{response_type}' never carries humor")
     if not profile.humor.enabled:

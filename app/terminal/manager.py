@@ -4,13 +4,16 @@ import time
 from typing import Dict, Optional
 
 from app.config import Config
-from .session import TerminalSession, LocalTerminalSession
+from .session import TerminalSession, LocalTerminalSession, SessionState
 
 logger = logging.getLogger("terminal")
 
 MAX_SESSIONS = 5
 SESSION_IDLE_TIMEOUT = 3600
 SESSION_MAX_LIFETIME = 28800
+# A session that is still negotiating its PTY/SSH channel reports
+# is_alive() == False. Give it this long before treating it as dead.
+CONNECT_GRACE_SECONDS = 90
 
 
 class TerminalManager:
@@ -18,10 +21,12 @@ class TerminalManager:
         self._sessions: Dict[str, TerminalSession] = {}
 
     async def create_session(self, rows=24, cols=80):
+        self._cleanup_expired()
         if len(self._sessions) >= MAX_SESSIONS:
-            self._cleanup_expired()
-            if len(self._sessions) >= MAX_SESSIONS:
-                raise RuntimeError("Too many active terminal sessions")
+            raise RuntimeError(
+                f"Too many active terminal sessions (limit {MAX_SESSIONS}). "
+                "Close another terminal or wait for one to expire and try again."
+            )
 
         mode = Config.EXECUTION_MODE.lower()
         if mode == "local":
@@ -66,15 +71,30 @@ class TerminalManager:
             s.close()
         self._sessions.clear()
 
+    def _is_reapable(self, session, now: float) -> bool:
+        """True when a session is dead or past its lifetime."""
+        state = getattr(getattr(session, "state", None), "value", None)
+        if state == SessionState.CONNECTING.value:
+            # Only a session stuck in CONNECTING for the grace period is dead;
+            # reaping it earlier kills a connect that is about to succeed and
+            # the client only sees "Terminal connection failed".
+            return (now - session.created_at) > CONNECT_GRACE_SECONDS
+        if state == SessionState.CLOSED.value:
+            return True
+        if (now - session.created_at) > SESSION_MAX_LIFETIME:
+            return True
+        if (now - session.last_activity) > SESSION_IDLE_TIMEOUT:
+            return True
+        return not session.is_alive()
+
     def _cleanup_expired(self):
         now = time.time()
         expired = [
             sid for sid, s in self._sessions.items()
-            if (now - s.last_activity) > SESSION_IDLE_TIMEOUT
-            or (now - s.created_at) > SESSION_MAX_LIFETIME
-            or not s.is_alive()
+            if self._is_reapable(s, now)
         ]
         for sid in expired:
+            logger.info("terminal_reaped session=%s", sid)
             self.close_session(sid)
 
     @property

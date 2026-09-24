@@ -1,10 +1,14 @@
 """Tests for the personality context assembly and system prompt integration."""
+from unittest.mock import MagicMock
+
+from app.personality.humor import HumorLevel
 from app.personality.personality_context import (
-    build_personality_directive, detect_user_style,
+    build_personality_directive, detect_user_style, select_register,
 )
 from app.personality.profile import DEFAULT_JARVIS, PRESETS
 from app.personality.state import ConversationState
-from app.agent import build_system_prompt
+from app.personality.tone import Severity, select_tone
+from app.agent import Agent, build_system_prompt
 
 
 class TestUserStyleDetection:
@@ -139,3 +143,125 @@ class TestVoiceFlavor:
     def test_flavor_rules_bound_technical_content(self):
         d = build_personality_directive("hey")
         assert "WORDING only" in d
+
+    def test_flavor_drops_out_once_infrastructure_is_degraded(self):
+        """Dialect is casual seasoning only — a degraded system gets plain speech."""
+        d = build_personality_directive("the jenkins container keeps crashing")
+        assert "Voice flavor" not in d
+
+    def test_flavor_discipline_prevents_try_hard_slang(self):
+        d = build_personality_directive("hey what's up")
+        assert "at most one slang marker per response" in d
+
+
+class TestRegisterSelection:
+    """Register = which volume of the same voice a response uses."""
+
+    def test_critical_severity_selects_urgent(self):
+        tone = select_tone(Severity.CRITICAL, "casual", 0.4, 0.2)
+        assert select_register(Severity.CRITICAL, tone, HumorLevel.NONE) == "urgent"
+
+    def test_elevated_severity_selects_focused(self):
+        tone = select_tone(Severity.ELEVATED, "casual", 0.4, 0.2)
+        assert select_register(Severity.ELEVATED, tone, HumorLevel.LIGHT) == "focused"
+
+    def test_relaxed_chat_selects_casual(self):
+        tone = select_tone(Severity.LOW, "casual", 0.4, 0.2)
+        assert select_register(Severity.LOW, tone, HumorLevel.SARCASTIC) == "casual"
+
+    def test_mutation_response_type_forces_urgent(self):
+        tone = select_tone(Severity.LOW, "casual", 0.4, 0.2)
+        assert select_register(Severity.LOW, tone, HumorLevel.NONE,
+                              "destructive_action") == "urgent"
+
+    def test_casual_message_renders_casual_register(self):
+        d = build_personality_directive("hey what's up")
+        assert "Register: casual" in d
+        assert "Volume dial" in d
+        assert "casual register" in d
+
+    def test_degraded_message_renders_focused_register(self):
+        d = build_personality_directive("the jenkins container keeps crashing")
+        assert "Register: focused" in d
+        assert "focused register" in d
+
+    def test_outage_renders_urgent_register(self):
+        d = build_personality_directive("production is down, everything is timing out")
+        assert "Register: urgent" in d
+        assert "urgent register" in d
+
+    def test_destructive_action_renders_urgent_register(self):
+        d = build_personality_directive("restart the jenkins container",
+                                        response_type="destructive_action")
+        assert "Register: urgent" in d
+        assert "Humor: none" in d
+
+    def test_joking_user_cannot_casualise_a_degraded_system(self):
+        """The key tone-switching guarantee: banter never lowers the volume
+        while infrastructure is actually degraded."""
+        d = build_personality_directive("lol the api keeps crashing again")
+        assert "Register: focused" in d
+        assert "Register: casual" not in d
+
+    def test_tone_switching_is_explained_as_one_voice(self):
+        d = build_personality_directive("hello")
+        assert "One character, three volumes" in d
+
+    def test_bad_news_rule_gives_urgency_priority(self):
+        d = build_personality_directive("hello")
+        assert "urgency outranks charm" in d
+
+    def test_try_hard_personality_is_ruled_out(self):
+        d = build_personality_directive("hello")
+        assert "try-hard" in d
+
+    def test_register_examples_are_omitted_for_minimal_answers(self):
+        d = build_personality_directive("quick: is nginx up? tldr")
+        assert "Volume dial" not in d
+
+    def test_kasi_preset_swaps_in_full_flavor_examples(self):
+        d = build_personality_directive("hey, check docker for me",
+                                        profile=PRESETS["KASI"])
+        assert "that deploy went sideways" in d
+
+    def test_default_voice_keeps_light_examples(self):
+        d = build_personality_directive("hey there")
+        assert "that deploy went sideways" not in d
+        assert "Nothing broken here" in d
+
+
+class TestCrossInterfaceConsistency:
+    """CLI and web/PWA must sound like the same character."""
+
+    def test_both_entrypoints_seed_the_same_base_prompt(self):
+        from app.api.app import SYSTEM_PROMPT as API_PROMPT, _build_history
+        from app.api.models import ChatMessage, Conversation, MessageRole
+        from app.main import fresh_history
+
+        conversation = Conversation()
+        conversation.messages.append(ChatMessage(role=MessageRole.USER, content="hi"))
+
+        assert fresh_history()[0] == {"role": "system", "content": API_PROMPT}
+        assert _build_history(conversation)[0] == {"role": "system", "content": API_PROMPT}
+
+    def test_personality_lives_in_one_place_only(self):
+        """Neither entry point may hardcode its own persona text."""
+        from app.api.app import SYSTEM_PROMPT as API_PROMPT
+        from app.main import fresh_history
+
+        assert "How you communicate" not in API_PROMPT
+        assert "How you communicate" not in fresh_history()[0]["content"]
+
+    def test_agent_applies_the_directive_once_and_after_the_safety_rules(self):
+        provider = MagicMock()
+        provider.name = "mock"
+        provider.chat.return_value = {"role": "assistant", "content": "ok", "tool_calls": []}
+        agent = Agent(provider=provider, tool_schemas=[], execute_tool_fn=lambda n, a: {},
+                      allowed_tool_names=set(), conversation_state=ConversationState())
+
+        agent.run("hello", history=[{"role": "system", "content": "base system prompt"}])
+
+        system = provider.chat.call_args[0][0][0]["content"]
+        assert system.count("How you communicate") == 1
+        assert system.find("How you communicate") > system.find("Never invent infrastructure information")
+        assert "Register:" in system

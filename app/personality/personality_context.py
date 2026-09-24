@@ -11,8 +11,14 @@ from __future__ import annotations
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional
 
-from app.personality.humor import HumorDecision, HumorLevel, should_use_humor
-from app.personality.profile import PersonalityConfig, VoiceFlavorSettings, get_profile
+from app.personality.humor import (
+    HumorDecision, HumorLevel, humor_forbidden_response_type, should_use_humor,
+)
+from app.personality.profile import (
+    VOICE_REGISTERS, VOICE_VOLUME_DIAL, PersonalityConfig, VoiceFlavorSettings,
+    VoiceRegister, get_profile,
+)
+from app.personality.response_style import style_guidance
 from app.personality.state import ConversationState
 from app.personality.tone import Severity, ToneDirective, classify_severity, select_tone
 
@@ -34,6 +40,8 @@ class PersonalityContext:
     tone: Optional[ToneDirective] = None
     humor: Optional[HumorDecision] = None
     user_style: str = "casual"
+    # Which volume of the voice this response uses (casual / focused / urgent).
+    register: str = "casual"
     preferences: Dict[str, str] = field(default_factory=dict)
     forbidden_openers: List[str] = field(default_factory=list)
     state_summary: Dict[str, str] = field(default_factory=dict)
@@ -62,6 +70,27 @@ def detect_user_style(text: str) -> str:
         return "technical"
     if any(m in lower for m in ("seriously", "properly", "exactly", "i need you to")):
         return "serious"
+    return "casual"
+
+
+def select_register(severity: Severity, tone: ToneDirective, humor_level: HumorLevel,
+                    response_type: str = "general") -> str:
+    """Pick which volume of the voice this response is written in.
+
+    Deterministic, and deliberately derived from decisions the pipeline has
+    already made: severity and the humor gate decide how serious the answer
+    is, this decides how it sounds. A joking user cannot drag a degraded
+    infrastructure answer back into casual register, and a casual question
+    cannot make an outage sound relaxed.
+    """
+    if (severity is Severity.CRITICAL
+            or tone.style == "serious"
+            or humor_forbidden_response_type(response_type)):
+        return "urgent"
+    if (severity is Severity.ELEVATED
+            or humor_level is HumorLevel.NONE
+            or tone.style in ("focused", "supportive", "technical")):
+        return "focused"
     return "casual"
 
 
@@ -112,7 +141,9 @@ def build_personality_directive(user_input: str,
     return _format_directive(profile, PersonalityContext(
         profile_name="DEFAULT_JARVIS",
         severity=severity, tone=tone, humor=humor,
-        user_style=style, preferences=preferences,
+        user_style=style,
+        register=select_register(severity, tone, humor.level, response_type),
+        preferences=preferences,
         forbidden_openers=list(profile.banned_phrases),
         state_summary=state.summary() if state is not None else {},
     ))
@@ -130,6 +161,11 @@ _KASI_WORDS = ("aweh", "eish", "yoh", "haibo", "sharp sharp", "sure thing", "aye
 def _flavor_lines(voice: VoiceFlavorSettings, ctx: PersonalityContext) -> List[str]:
     if ctx.humor_level is HumorLevel.NONE or voice.style == "none":
         return []
+    # Dialect is casual-register seasoning only. Once something is actually
+    # degraded, plain speech carries the urgency better than slang — the voice
+    # stays warm, the vocabulary goes straight.
+    if ctx.severity is not Severity.LOW:
+        return []
     if voice.style == "kasi":
         if voice.intensity >= 0.7:
             register = ("- Voice flavor: full kasi street energy — greet like a friend "
@@ -143,6 +179,9 @@ def _flavor_lines(voice: VoiceFlavorSettings, ctx: PersonalityContext) -> List[s
                         "Most responses stay plain; the slang is a wink, not a uniform.")
         return [
             register,
+            "- Flavor discipline: at most one slang marker per response, and only where "
+            "it lands naturally. Never stack them, never explain them, and never let "
+            "slang stand in for the actual answer.",
             "- Flavor rules: slang affects WORDING only. Never let it touch numbers, "
             "commands, severities, or safety instructions. When severity is elevated "
             "or the user is frustrated, drop to plain speech automatically.",
@@ -150,22 +189,46 @@ def _flavor_lines(voice: VoiceFlavorSettings, ctx: PersonalityContext) -> List[s
     return []
 
 
+def _register_lines(register: VoiceRegister, profile: PersonalityConfig,
+                    ctx: PersonalityContext) -> List[str]:
+    """Concrete reference phrasings for the register this response is in."""
+    if ctx.tone.verbosity == "minimal":
+        # A one-sentence answer has no room for example material.
+        return []
+    if (register.name == "casual" and profile.voice.style == "kasi"
+            and profile.voice.intensity >= 0.7):
+        register = VOICE_REGISTERS["casual_full"]
+    lines = [
+        f"- Volume dial, same voice at different volumes: {VOICE_VOLUME_DIAL}",
+        f"- Reference phrasing for this response ({register.name} register) — match the "
+        "register, never copy these lines verbatim:",
+    ]
+    lines += [f'    - "{example}"' for example in register.examples]
+    lines.append(f"- Register discipline: {register.instruction}")
+    return lines
+
+
 def _format_directive(profile: PersonalityConfig, ctx: PersonalityContext) -> str:
     """Render the resolved decisions as compact prompt guidance."""
+    register = VOICE_REGISTERS.get(ctx.register) or VOICE_REGISTERS["casual"]
     lines = [
         "How you communicate (personality — applies to wording only, never to facts, tools, or safety rules):",
         f"- You are {profile.name}, {profile.role}: {profile.character}.",
-        f"- Current severity: {ctx.severity.value}. Current conversation style: {ctx.user_style}.",
+        "- One character, three volumes — never a different personality per response: warm and "
+        "casual when you are just talking, sharp and focused the moment something is wrong, "
+        "plain and factual when it is serious. The judgment and the facts never change; only "
+        "the volume does.",
+        "- Sound like the senior engineer sitting next to the user — a peer who knows this "
+        "system, not a service desk reading a script. No corporate padding, no ceremony, no "
+        "thanking the user for their patience.",
+        f"- Current severity: {ctx.severity.value}. Current conversation style: {ctx.user_style}. "
+        f"Register: {register.name} ({register.when}).",
         f"- Tone: {ctx.tone.style}; length: {ctx.tone.verbosity} ({ctx.tone.reasoning}).",
     ]
 
     # Response length discipline — answer as deeply as needed, no deeper.
-    if ctx.tone.verbosity == "minimal":
-        lines.append("- Answer in one short sentence or a few words. No preamble, no recap.")
-    elif ctx.tone.verbosity == "concise":
-        lines.append("- Default to 1-3 sentences. Lead with the answer; explain only if it adds value.")
-    elif ctx.tone.verbosity == "detailed":
-        lines.append("- Give a thorough explanation with evidence, but stay conversational — no headers or bullet-point filler unless the structure genuinely helps.")
+    # Wording lives in response_style.py so verbosity stays defined once.
+    lines.append(f"- {style_guidance(ctx.tone)}")
 
     # Humor guidance.
     if ctx.humor_level is HumorLevel.NONE:
@@ -181,6 +244,10 @@ def _format_directive(profile: PersonalityConfig, ctx: PersonalityContext) -> st
     # allowed at all — flavor never overrides the severity suppression.
     lines.extend(_flavor_lines(profile.voice, ctx))
 
+    # Concrete reference phrasings for the register in play, so the voice is
+    # pattern-matched from samples instead of inferred from adjectives.
+    lines.extend(_register_lines(register, profile, ctx))
+
     # Natural voice rules.
     lines += [
         "- Talk like a sharp engineer sitting next to the user, not like a service desk. Short openers like \"Yep.\", \"Okay.\", \"Found it.\" are fine when they fit — don't force them into every message.",
@@ -189,6 +256,10 @@ def _format_directive(profile: PersonalityConfig, ctx: PersonalityContext) -> st
         "- If something is unavailable or a tool failed, say so plainly. Never present failure as success.",
         "- Don't invent logs, metrics, scores, hostnames, capabilities, or audit records. Only describe what tools actually returned.",
         "- No fake emotions (\"I feel worried\"). React through observations (\"That's ugly\", \"Well, that's unexpected\").",
+        "- When the news is bad, the personality steps back: say what is broken first, plainly. "
+        "No jokes, no slang, no softening — urgency outranks charm.",
+        "- Never perform personality: no catchphrase at the end of every message, no slang in "
+        "every reply, no nicknames. If a line would sound try-hard out loud, cut it.",
     ]
 
     # Banned AI-speak.

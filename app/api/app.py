@@ -63,6 +63,14 @@ app.include_router(terminal_router)
 @app.on_event("startup")
 def warm_voice_models():
     """Load optional voice STT in the background; never delay API startup."""
+    # The API is usually started with `uvicorn app.api.app:app`, which does not
+    # configure application logging; without this, terminal connection and
+    # rejection events only reached the last-resort stderr handler and nothing
+    # was written to logs/agent.log. Diagnostic messages that the terminal page
+    # tells the user to look for must actually exist.
+    if not logging.getLogger().handlers:
+        from app.logging_config import setup_logging
+        setup_logging()
     if Config.VOICE_ENABLED:
         import threading
         threading.Thread(target=lambda: get_stt().available, daemon=True, name="jarvis-stt-warmup").start()
